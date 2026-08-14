@@ -14,7 +14,7 @@ order: 0.5
 
 Изображение Логика Связи
 
-![](.Bases001/_index.jpeg){width=1713px height=924px}
+![](Bases001/_index.jpeg){width=1713px height=924px}
 
 
 
