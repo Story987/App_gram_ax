@@ -21,115 +21,122 @@ jobs:
     name: 🔍 Проверка и конвертация .md файлов
     runs-on: ubuntu-latest
     steps:
+      # =============== ШАГ 1: ЗАГРУЗКА КОДА ===============
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
+      # =============== ШАГ 2: УСТАНОВКА NODE.JS (ЯВНАЯ ВЕРСИЯ) ===============
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4.3.0
         with:
-          node-version: '22'
+          node-version: '22.14.0'  # Фиксированная версия для стабильности
+          check-latest: false
 
+      # =============== ШАГ 3: УСТАНОВКА ИНСТРУМЕНТОВ (С ДИАГНОСТИКОЙ) ===============
       - name: 📦 Install markdown tools
+        id: install-tools
         run: |
-          npm install -g markdownlint-cli
-          npm install -g marked
-          npm install -g prettier
+          echo "🔧 Устанавливаем markdownlint-cli..."
+          npm install -g markdownlint-cli@0.35.0  # Фиксированная версия
+          echo "🔧 Устанавливаем marked..."
+          npm install -g marked@9.1.0
+          echo "🔧 Устанавливаем prettier..."
+          npm install -g prettier@3.1.0
+          echo "✅ Все инструменты установлены"
+          echo "📋 Версии:"
+          markdownlint --version || echo "markdownlint не найден"
+          marked --version || echo "marked не найден"
+          prettier --version || echo "prettier не найден"
 
-      - name: 🔍 Lint Markdown files (non-fatal)
+      # =============== ШАГ 4: ПРОВЕРКА ЛИНТЕРОМ (С ПЕРЕХВАТОМ ОШИБОК) ===============
+      - name: 🔍 Lint Markdown files
+        id: lint
         continue-on-error: true
         run: |
-          echo "🔍 Проверяем все .md файлы..."
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 markdownlint || true
-          echo "✅ Проверка завершена (с возможными ошибками)"
+          echo "🔍 Проверяем все .md файлы линтером..."
+          # Находим файлы и обрабатываем по одному
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
+            echo "  Проверяем: $file"
+            markdownlint "$file" || echo "  ⚠️ Ошибка в $file"
+          done
+          echo "✅ Проверка завершена"
 
-      # =============== ДИАГНОСТИКА: СПИСОК ВСЕХ ФАЙЛОВ ===============
+      # =============== ШАГ 5: СПИСОК ВСЕХ MD ФАЙЛОВ ===============
       - name: 📋 List all MD files
+        id: list-files
         run: |
           echo "📋 Найденные .md файлы:"
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print | sort
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print | sort || echo "❌ Ошибка при поиске файлов"
           echo "---"
+          echo "📊 Количество файлов:"
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | wc -l
 
-      # =============== КОНВЕРТАЦИЯ С МАКСИМАЛЬНОЙ УСТОЙЧИВОСТЬЮ ===============
-      - name: 🌐 Convert MD to HTML (robust)
+      # =============== ШАГ 6: КОНВЕРТАЦИЯ С ПОШАГОВОЙ ОБРАБОТКОЙ ===============
+      - name: 🌐 Convert MD to HTML
+        id: convert
         run: |
           echo "🌐 Конвертируем .md в .html..."
           mkdir -p html_output
-          TOTAL_FILES=0
-          SUCCESS_FILES=0
-          FAILED_FILES=0
+          SUCCESS=0
+          FAILED=0
           
+          # Обрабатываем каждый файл отдельно
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
-            TOTAL_FILES=$((TOTAL_FILES + 1))
+            # Пропускаем, если файл пустой
+            if [ ! -s "$file" ]; then
+              echo "  ⚠️ Пустой файл: $file, пропускаем"
+              continue
+            fi
+            
             relpath=$(realpath --relative-to="." "$file" 2>/dev/null || echo "$file")
             htmlpath="${relpath%.md}.html"
             mkdir -p "html_output/$(dirname "$htmlpath")"
             
-            # Пытаемся сконвертировать с игнорированием ошибок
-            if marked --no-strict "$file" > "html_output/$htmlpath" 2>/dev/null; then
-              echo "  ✅ Успешно: ${file}"
-              SUCCESS_FILES=$((SUCCESS_FILES + 1))
+            # Конвертируем с явной проверкой
+            if marked "$file" --no-strict > "html_output/$htmlpath" 2>/dev/null; then
+              echo "  ✅ Успешно: $file"
+              SUCCESS=$((SUCCESS + 1))
             else
-              echo "  ⚠️ Ошибка конвертации: ${file}, создаём заглушку"
-              FAILED_FILES=$((FAILED_FILES + 1))
-              cat > "html_output/$htmlpath" <<-EOF
-              <!DOCTYPE html>
-              <html>
-              <head><meta charset="UTF-8"><title>Ошибка конвертации</title></head>
-              <body>
-                <h1>⚠️ Не удалось сконвертировать файл</h1>
-                <p><strong>Файл:</strong> ${file}</p>
-                <p><strong>Ветка:</strong> ${{ github.ref_name }}</p>
-                <p>Пожалуйста, проверьте синтаксис Markdown.</p>
-              </body>
-              </html>
-              EOF
+              echo "  ❌ Ошибка: $file"
+              FAILED=$((FAILED + 1))
+              # Создаём заглушку
+              echo "<html><body><h1>Ошибка конвертации</h1><p>$file</p></body></html>" > "html_output/$htmlpath"
             fi
           done
           
-          echo "📊 Статистика: всего файлов $TOTAL_FILES, успешно $SUCCESS_FILES, ошибок $FAILED_FILES"
-          if [ $FAILED_FILES -gt 0 ]; then
-            echo "⚠️ Некоторые файлы не сконвертировались, но процесс продолжен."
+          echo "📊 Статистика: успешно $SUCCESS, ошибок $FAILED"
+          if [ $FAILED -gt 0 ]; then
+            echo "⚠️ Есть ошибки, но процесс продолжен"
           fi
 
-      - name: 📋 Generate Markdown index with folders
+      # =============== ШАГ 7: ГЕНЕРАЦИЯ ИНДЕКСА ===============
+      - name: 📋 Generate Markdown index
+        id: index
         run: |
-          echo "📋 Генерируем индекс с группировкой по папкам..."
+          echo "📋 Генерируем индекс..."
           echo "# 📚 Документация проекта" > INDEX.md
           echo "" >> INDEX.md
           echo "**Ветка:** ${{ github.ref_name }}" >> INDEX.md
           echo "**Сгенерировано:** $(date '+%Y-%m-%d %H:%M:%S')" >> INDEX.md
           echo "" >> INDEX.md
           
-          # Ищем папку Страницы
           if [ -d "./Страницы" ]; then
             echo "## 📁 Страницы" >> INDEX.md
-            echo "" >> INDEX.md
-            echo "| Файл | Описание |" >> INDEX.md
-            echo "|------|----------|" >> INDEX.md
-            find ./Страницы -name "*.md" -not -path "./node_modules/*" 2>/dev/null | sort | while read file; do
-              clean_file="${file#./}"
+            echo "| Файл |" >> INDEX.md
+            echo "|------|" >> INDEX.md
+            find ./Страницы -name "*.md" 2>/dev/null | sort | while read file; do
               name=$(basename "$file" .md)
-              echo "| [${name}](${clean_file}) | ${name} |" >> INDEX.md
+              echo "| [$name]($file) |" >> INDEX.md
             done
-          else
-            echo "## 📁 Папка 'Страницы' не найдена" >> INDEX.md
           fi
           
-          # Другие файлы
-          echo "" >> INDEX.md
-          echo "## 📄 Другие файлы" >> INDEX.md
-          echo "" >> INDEX.md
-          echo "| Файл | Путь |" >> INDEX.md
-          echo "|------|------|" >> INDEX.md
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -not -path "./Страницы/*" 2>/dev/null | sort | while read file; do
-            clean_file="${file#./}"
-            name=$(basename "$file" .md)
-            echo "| [${name}](${clean_file}) | \`${clean_file}\` |" >> INDEX.md
-          done
+          echo "✅ Индекс создан"
 
+      # =============== ШАГ 8: СОХРАНЕНИЕ АРТЕФАКТОВ ===============
       - name: 📦 Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4.4.3
         with:
           name: markdown-output-${{ github.ref_name }}
@@ -137,12 +144,14 @@ jobs:
             *.md
             html_output/
             INDEX.md
-          retention-days: 30
+          retention-days: 7
+          if-no-files-found: ignore
 
-      - name: 📁 Prepare for deployment (all branches)
+      # =============== ШАГ 9: ПОДГОТОВКА К ДЕПЛОЮ ===============
+      - name: 📁 Prepare for deployment
+        if: always()
         run: |
           mkdir -p deploy_temp
-          
           if [ "${{ github.ref_name }}" == "main" ]; then
             PREFIX=""
           elif [ "${{ github.ref_name }}" == "develop" ]; then
@@ -152,37 +161,15 @@ jobs:
             SAFE_NAME=$(echo "$BRANCH_NAME" | sed 's/Ветка_/branch_/g' | sed 's/Тест/test/g' | tr '[:upper:]' '[:lower:]')
             PREFIX="${SAFE_NAME}/"
           fi
-          
           mkdir -p "deploy_temp/$PREFIX"
-          cp -r html_output/* "deploy_temp/$PREFIX"
-          
-          if [ "${{ github.ref_name }}" == "main" ]; then
-            cat > deploy_temp/index.html << 'EOF'
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="UTF-8"><title>📚 Документация</title>
-            <style>
-            body{font-family:sans-serif;max-width:800px;margin:auto;padding:2rem;line-height:1.6}
-            h1{color:#2c3e50}a{color:#3498db;text-decoration:none}a:hover{text-decoration:underline}
-            li{margin:0.5rem 0}
-            </style>
-            </head>
-            <body>
-            <h1>📚 Документация проекта</h1>
-            <p>Версии документации из разных веток:</p>
-            <ul>
-            <li><a href="/">Основная (main)</a></li>
-            <li><a href="/develop/">Разработка (develop)</a></li>
-            <li><a href="/branch_test1/">Тестовая (Ветка_Тест1)</a></li>
-            </ul>
-            <hr>
-            <p><small>Автоматическая сборка</small></p>
-            </body>
-            </html>
-            EOF
+          if [ -d "html_output" ]; then
+            cp -r html_output/* "deploy_temp/$PREFIX" 2>/dev/null || true
           fi
+          echo "✅ Подготовка к деплою завершена"
 
+      # =============== ШАГ 10: ДЕПЛОЙ НА GH-PAGES ===============
       - name: 🚀 Deploy to gh-pages branch
+        if: always()
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -193,6 +180,7 @@ jobs:
           user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_message: '📝 Деплой ветки ${{ github.ref_name }}'
 
+  # =============== ДЕПЛОЙ НА GITHUB PAGES ===============
   deploy-pages:
     name: 🚀 Deploy to GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -211,6 +199,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
+  # =============== ПРОВЕРКА ССЫЛОК ===============
   check-links:
     name: 🔗 Проверка битых ссылок
     runs-on: ubuntu-latest
