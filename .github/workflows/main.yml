@@ -1,0 +1,102 @@
+name: Digital Garden - Full Auto Index
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'src/site/notes/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan EVERYTHING in notes folder
+        run: |
+          cd src/site/notes/
+          echo "🔎 Глубокое сканирование всех слоев реальности..."
+          
+          # Находим ВСЕ файлы, кроме самого индекса и служебных
+          # Мы берем и .md, и .html, и картинки, и папки
+          find . -type f ! -name "index.html" ! -name "files-list.txt" | sed 's|^\./||' | sort > files-list.txt
+          
+          echo "✅ Найдено объектов: $(wc -l < files-list.txt)"
+
+      - name: Build Intelligent Index
+        run: |
+          cd src/site/notes
+          echo "🏗️ Сборка динамического интерфейса..."
+
+          # Пишем заголовок и стили
+          echo '<!DOCTYPE html><html lang="ru"><head>' > index.html
+          echo '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' >> index.html
+          echo '<title>🌿 Digital Garden Explorer</title>' >> index.html
+          echo '<style>' >> index.html
+          echo 'body { font-family: "Segoe UI", Tahoma, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; line-height: 1.6; }' >> index.html
+          echo '.container { max-width: 900px; margin: 0 auto; }' >> index.html
+          echo 'h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }' >> index.html
+          echo '.search { width: 100%; padding: 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #fff; margin-bottom: 20px; }' >> index.html
+          echo '.list { display: flex; flex-direction: column; gap: 8px; }' >> index.html
+          echo '.item { background: #161b22; padding: 12px 18px; border-radius: 6px; text-decoration: none; color: #58a6ff; border: 1px solid #30363d; display: flex; justify-content: space-between; transition: 0.2s; }' >> index.html
+          echo '.item:hover { background: #1c2128; border-color: #58a6ff; transform: translateX(5px); }' >> index.html
+          echo '.path { color: #8b949e; font-size: 0.85em; }' >> index.html
+          echo '.tag { font-size: 0.7em; background: #238636; color: white; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; }' >> index.html
+          echo '</style></head><body>' >> index.html
+
+          # Тело страницы
+          echo '<div class="container"><h1>🌿 Мой Цифровой Сад</h1>' >> index.html
+          echo '<input type="text" id="q" class="search" placeholder="Поиск по названию или папке...">' >> index.html
+          echo '<div id="files" class="list">Загрузка архивов...</div>' >> index.html
+          echo '<p style="text-align:center; opacity:0.3; margin-top:40px;">Авто-генерация: '$(date +'%Y-%m-%d %H:%M')'</p></div>' >> index.html
+
+          # Скрипт отображения
+          echo '<script>' >> index.html
+          echo 'async function start() {' >> index.html
+          echo '  const r = await fetch("files-list.txt");' >> index.html
+          echo '  const t = await r.json().catch(() => null) || (await r.text()).split("\\n").filter(f=>f.trim());' >> index.html
+          echo '  const div = document.getElementById("files");' >> index.html
+          echo '  const draw = (arr) => {' >> index.html
+          echo '    div.innerHTML = arr.map(f => {' >> index.html
+          echo '      const parts = f.split("/");' >> index.html
+          echo '      const name = parts.pop();' >> index.html
+          echo '      const path = parts.join("/") || "Корень";' >> index.html
+          echo '      const ext = name.split(".").pop();' >> index.html
+          echo '      return `<a href="${encodeURI(f)}" class="item">' >> index.html
+          echo '        <div><span class="path">${path} / </span><b>${name}</b></div>' >> index.html
+          echo '        <span class="tag">${ext}</span></a>`;' >> index.html
+          echo '    }).join("");' >> index.html
+          echo '  };' >> index.html
+          echo '  draw(t);' >> index.html
+          echo '  document.getElementById("q").oninput = (e) => {' >> index.html
+          echo '    const s = e.target.value.toLowerCase();' >> index.html
+          echo '    draw(t.filter(f => f.toLowerCase().includes(s)));' >> index.html
+          echo '  };' >> index.html
+          echo '}' >> index.html
+          echo 'start();' >> index.html
+          echo '</script></body></html>' >> index.html
+
+      - name: Upload
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'src/site/notes/'
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
