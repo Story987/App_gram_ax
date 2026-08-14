@@ -2,23 +2,25 @@ name: 📝 Markdown Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches:
+      - main
+      - develop
+      - 'Ветка_Тест1'          # Добавлена ваша тестовая ветка
+      - '**'                   # Опционально: можно раскомментировать для всех веток
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
-# Разрешаем деплой на GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
 jobs:
-  # =============== JOB 1: ПРОВЕРКА И КОНВЕРТАЦИЯ ===============
   markdown-processing:
     name: 🔍 Проверка и конвертация .md файлов
     runs-on: ubuntu-latest
-    
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
@@ -67,7 +69,8 @@ jobs:
           echo "📋 Генерируем индекс всех .md файлов..."
           echo "# 📚 Список Markdown файлов в репозитории" > INDEX.md
           echo "" >> INDEX.md
-          echo "Всего файлов: $(find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | wc -l)" >> INDEX.md
+          echo "**Ветка:** ${{ github.ref_name }}" >> INDEX.md
+          echo "**Всего файлов:** $(find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | wc -l)" >> INDEX.md
           echo "" >> INDEX.md
           echo "| Файл | Путь |" >> INDEX.md
           echo "|------|------|" >> INDEX.md
@@ -80,21 +83,18 @@ jobs:
       - name: 📦 Upload artifacts
         uses: actions/upload-artifact@v4.4.3
         with:
-          name: markdown-output
+          name: markdown-output-${{ github.ref_name }}  # Уникальное имя для каждой ветки
           path: |
             *.md
             html_output/
             INDEX.md
           retention-days: 30
 
-      # =============== НОВЫЙ ШАГ: ПОДГОТОВКА К ДЕПЛОЮ ===============
-      - name: 📁 Prepare for GitHub Pages
+      - name: 📁 Prepare for GitHub Pages (только для main)
+        if: github.ref == 'refs/heads/main'
         run: |
-          # Создаём папку для деплоя
           mkdir -p pages_output
-          # Копируем все HTML и добавляем красивый индекс
           cp -r html_output/* pages_output/
-          # Создаём главную страницу index.html
           cat > pages_output/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
@@ -111,22 +111,19 @@ jobs:
           <hr>
           <ul>
           EOF
-          # Добавляем ссылки на все HTML
           find pages_output -name "*.html" -not -name "index.html" | sort | while read file; do
-            # Убираем pages_output/ из пути
             rel="${file#pages_output/}"
-            # Получаем имя без расширения
             name=$(basename "$rel" .html)
             echo "<li><a href=\"$rel\">$name</a> <span class=\"file-size\">(.html)</span></li>" >> pages_output/index.html
           done
           echo '</ul><hr><p><small>Автоматическая сборка от $(date)</small></p></body></html>' >> pages_output/index.html
 
-      - name: 📤 Upload Pages artifact
+      - name: 📤 Upload Pages artifact (только для main)
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages_output
 
-  # =============== JOB 2: ДЕПЛОЙ НА GITHUB PAGES ===============
   deploy:
     name: 🚀 Deploy to GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -140,7 +137,6 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-  # =============== JOB 3: ПРОВЕРКА ССЫЛОК (ОПЦИОНАЛЬНО) ===============
   check-links:
     name: 🔗 Проверка битых ссылок
     runs-on: ubuntu-latest
