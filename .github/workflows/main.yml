@@ -5,15 +5,14 @@ on:
     branches:
       - main
       - develop
-      - 'Ветка_Тест1'          # Добавлена ваша тестовая ветка
-      - '**'                   # Опционально: можно раскомментировать для всех веток
+      - 'Ветка_Тест1'
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -43,88 +42,130 @@ jobs:
         run: |
           echo "🔍 Проверяем все .md файлы..."
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 markdownlint || true
-          echo "✅ Проверка завершена"
 
-      - name: 💅 Format Markdown files
-        continue-on-error: true
+      - name: 🌐 Convert MD to HTML (with structure)
         run: |
-          echo "💅 Форматируем .md файлы..."
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 prettier --write --prose-wrap=always || true
-          echo "✅ Форматирование завершено"
-
-      - name: 🌐 Convert MD to HTML
-        run: |
-          echo "🌐 Конвертируем .md в .html..."
+          echo "🌐 Конвертируем .md в .html с сохранением структуры..."
           mkdir -p html_output
+          
+          # Находим все .md файлы, включая те, что в папке Страницы
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
-            relpath=$(realpath --relative-to="." "$file" | sed 's/\.md$//')
-            mkdir -p "html_output/$(dirname "$relpath")"
-            marked "$file" > "html_output/${relpath}.html"
-            echo "  ✅ ${file} → html_output/${relpath}.html"
+            # Получаем путь относительно корня
+            relpath=$(realpath --relative-to="." "$file")
+            # Меняем расширение на .html
+            htmlpath="${relpath%.md}.html"
+            # Создаём папку для HTML
+            mkdir -p "html_output/$(dirname "$htmlpath")"
+            # Конвертируем
+            marked "$file" > "html_output/$htmlpath"
+            echo "  ✅ ${file} → html_output/$htmlpath"
           done
-          echo "✅ Конвертация завершена"
 
-      - name: 📋 Generate Markdown index
+      - name: 📋 Generate Markdown index with folders
         run: |
-          echo "📋 Генерируем индекс всех .md файлов..."
-          echo "# 📚 Список Markdown файлов в репозитории" > INDEX.md
+          echo "📋 Генерируем индекс с группировкой по папкам..."
+          echo "# 📚 Документация проекта" > INDEX.md
           echo "" >> INDEX.md
           echo "**Ветка:** ${{ github.ref_name }}" >> INDEX.md
-          echo "**Всего файлов:** $(find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | wc -l)" >> INDEX.md
+          echo "**Сгенерировано:** $(date '+%Y-%m-%d %H:%M:%S')" >> INDEX.md
+          echo "" >> INDEX.md
+          
+          # Группируем файлы по папкам
+          echo "## 📁 Страницы" >> INDEX.md
+          echo "" >> INDEX.md
+          echo "| Файл | Описание |" >> INDEX.md
+          echo "|------|----------|" >> INDEX.md
+          
+          # Ищем файлы в папке Страницы (и её подпапках)
+          find ./Страницы -name "*.md" -not -path "./node_modules/*" 2>/dev/null | sort | while read file; do
+            clean_file="${file#./}"
+            name=$(basename "$file" .md)
+            echo "| [${name}](${clean_file}) | ${name} |" >> INDEX.md
+          done
+          
+          # Если есть другие .md файлы вне папки Страницы
+          echo "" >> INDEX.md
+          echo "## 📄 Другие файлы" >> INDEX.md
           echo "" >> INDEX.md
           echo "| Файл | Путь |" >> INDEX.md
           echo "|------|------|" >> INDEX.md
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | sort | while read file; do
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -not -path "./Страницы/*" | sort | while read file; do
             clean_file="${file#./}"
-            echo "| [${clean_file}](${clean_file}) | \`${clean_file}\` |" >> INDEX.md
+            name=$(basename "$file" .md)
+            echo "| [${name}](${clean_file}) | \`${clean_file}\` |" >> INDEX.md
           done
-          echo "✅ Индекс создан: INDEX.md"
 
       - name: 📦 Upload artifacts
         uses: actions/upload-artifact@v4.4.3
         with:
-          name: markdown-output-${{ github.ref_name }}  # Уникальное имя для каждой ветки
+          name: markdown-output-${{ github.ref_name }}
           path: |
             *.md
             html_output/
             INDEX.md
           retention-days: 30
 
-      - name: 📁 Prepare for GitHub Pages (только для main)
-        if: github.ref == 'refs/heads/main'
+      - name: 📁 Prepare for deployment (all branches)
         run: |
-          mkdir -p pages_output
-          cp -r html_output/* pages_output/
-          cat > pages_output/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head><meta charset="UTF-8"><title>📚 Документация</title>
-          <style>body{font-family:sans-serif;max-width:800px;margin:auto;padding:2rem;line-height:1.6}
-          h1{color:#2c3e50}a{color:#3498db;text-decoration:none}a:hover{text-decoration:underline}
-          li{margin:0.5rem 0}
-          .file-size{color:#7f8c8d;font-size:0.9rem}
-          </style>
-          </head>
-          <body>
-          <h1>📚 Документация из Markdown</h1>
-          <p>Сгенерировано автоматически из <code>.md</code> файлов репозитория.</p>
-          <hr>
-          <ul>
-          EOF
-          find pages_output -name "*.html" -not -name "index.html" | sort | while read file; do
-            rel="${file#pages_output/}"
-            name=$(basename "$rel" .html)
-            echo "<li><a href=\"$rel\">$name</a> <span class=\"file-size\">(.html)</span></li>" >> pages_output/index.html
-          done
-          echo '</ul><hr><p><small>Автоматическая сборка от $(date)</small></p></body></html>' >> pages_output/index.html
+          mkdir -p deploy_temp
+          
+          # Определяем префикс для ветки
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            PREFIX=""
+          elif [ "${{ github.ref_name }}" == "develop" ]; then
+            PREFIX="develop/"
+          else
+            # Для Ветка_Тест1 → branch_test1/
+            BRANCH_NAME="${{ github.ref_name }}"
+            SAFE_NAME=$(echo "$BRANCH_NAME" | sed 's/Ветка_/branch_/g' | sed 's/Тест/test/g' | tr '[:upper:]' '[:lower:]')
+            PREFIX="${SAFE_NAME}/"
+          fi
+          
+          echo "Префикс для ${{ github.ref_name }}: $PREFIX"
+          
+          # Копируем HTML с префиксом
+          mkdir -p "deploy_temp/$PREFIX"
+          cp -r html_output/* "deploy_temp/$PREFIX"
+          
+          # Для main создаём общий индекс
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            cat > deploy_temp/index.html << 'EOF'
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="UTF-8"><title>📚 Документация</title>
+            <style>
+            body{font-family:sans-serif;max-width:800px;margin:auto;padding:2rem;line-height:1.6}
+            h1{color:#2c3e50}a{color:#3498db;text-decoration:none}a:hover{text-decoration:underline}
+            li{margin:0.5rem 0}
+            </style>
+            </head>
+            <body>
+            <h1>📚 Документация проекта</h1>
+            <p>Версии документации из разных веток:</p>
+            <ul>
+            <li><a href="/">Основная (main)</a></li>
+            <li><a href="/develop/">Разработка (develop)</a></li>
+            <li><a href="/branch_test1/">Тестовая (Ветка_Тест1)</a></li>
+            </ul>
+            <hr>
+            <p><small>Автоматическая сборка</small></p>
+            </body>
+            </html>
+            EOF
+          fi
 
-      - name: 📤 Upload Pages artifact (только для main)
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
+      - name: 🚀 Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: pages_output
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy_temp
+          publish_branch: gh-pages
+          keep_files: true
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: '📝 Деплой ветки ${{ github.ref_name }} (Страницы включены)'
 
-  deploy:
+  deploy-pages:
     name: 🚀 Deploy to GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: markdown-processing
@@ -133,7 +174,12 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: 🚀 Deploy to GitHub Pages
+      - name: 📥 Checkout gh-pages
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: gh-pages
+          path: gh-pages-content
+      - name: 🚀 Deploy
         id: deployment
         uses: actions/deploy-pages@v4
 
@@ -145,8 +191,7 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
-
-      - name: 🔗 Check broken links
+      - name: 🔗 Check
         uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
           use-quiet-mode: 'yes'
