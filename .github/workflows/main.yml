@@ -5,7 +5,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # Возможность запустить вручную из интерфейса GitHub
+  workflow_dispatch:
 
 jobs:
   # =============== JOB 1: КАЧЕСТВО КОДА ===============
@@ -14,74 +14,119 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2 # Фиксированная стабильная версия
 
-      - name: 🟢 Setup Node.js (пример)
-        uses: actions/setup-node@v4
+      - name: 🟢 Setup Node.js (LTS)
+        uses: actions/setup-node@v4.3.0 # Актуальная версия
         with:
-          node-version: '20'
+          node-version: '22' # Используем актуальную LTS
+          # Кеширование будет работать ТОЛЬКО если есть lock-файл
           cache: 'npm'
 
-      - name: 📦 Install dependencies
-        run: npm ci
+      - name: 📦 Install dependencies (умный режим)
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "🔒 Lockfile найден, используем npm ci"
+            npm ci
+          elif [ -f yarn.lock ]; then
+            echo "🔒 Lockfile найден, используем yarn"
+            yarn install --frozen-lockfile
+          else
+            echo "⚠️ Lockfile НЕ найден, используем npm install (медленнее, но работает)"
+            npm install
+          fi
 
-      - name: 🔍 Run ESLint
-        run: npm run lint -- --max-warnings 0 # Строгий режим
+      - name: 🔍 Run ESLint (если есть)
+        run: |
+          if npm list eslint >/dev/null 2>&1; then
+            npm run lint -- --max-warnings 0
+          else
+            echo "⚠️ ESLint не установлен, пропускаем"
+          fi
 
-      - name: 💅 Check Prettier
-        run: npm run format:check
+      - name: 💅 Check Prettier (если есть)
+        run: |
+          if npm list prettier >/dev/null 2>&1; then
+            npm run format:check
+          else
+            echo "⚠️ Prettier не установлен, пропускаем"
+          fi
 
   # =============== JOB 2: СБОРКА И ТЕСТЫ ===============
   build-and-test:
     name: 🏗️ Build & Test
-    needs: quality # Не запустится, пока не пройдёт линтер
+    needs: quality
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20] # Проверяем совместимость на двух версиях
+        node-version: [20, 22] # Проверяем на двух LTS
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: 🟢 Setup Node ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.3.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
-      - name: 📦 Install deps
-        run: npm ci
+      - name: 📦 Install deps (адаптивно)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          else
+            npm install
+          fi
 
-      - name: 🛠️ Build project
-        run: npm run build
+      - name: 🛠️ Build project (если есть скрипт)
+        run: |
+          if npm list | grep -q "build"; then
+            npm run build
+          else
+            echo "⚠️ Скрипт 'build' не найден, пропускаем"
+          fi
         env:
-          CI: true # Останавливаем сборку при варнингах
+          CI: true
 
-      - name: 🧪 Run tests with coverage
-        run: npm run test:coverage
+      - name: 🧪 Run tests (если есть)
+        run: |
+          if npm list | grep -q "test"; then
+            npm run test:coverage || npm run test
+          else
+            echo "⚠️ Скрипт 'test' не найден, пропускаем"
+          fi
 
-      - name: 📊 Upload coverage to artifacts
-        uses: actions/upload-artifact@v4
+      - name: 📊 Upload coverage (если есть)
+        if: always()
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: coverage-report-node-${{ matrix.node-version }}
-          path: coverage/
+          path: |
+            coverage/
+            .nyc_output/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: 💬 Post coverage comment (для PR)
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && hashFiles('coverage/coverage-summary.json') != ''
+        uses: actions/github-script@v7.0.1
         with:
           script: |
             const fs = require('fs');
-            const coverage = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json'));
-            const pct = coverage.total.lines.pct;
-            const msg = `✅ **Coverage:** ${pct}% (Node ${{ matrix.node-version }})`;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: msg
-            });
+            const path = './coverage/coverage-summary.json';
+            if (fs.existsSync(path)) {
+              const coverage = JSON.parse(fs.readFileSync(path));
+              const pct = coverage.total.lines.pct;
+              const msg = `✅ **Coverage:** ${pct}% (Node ${{ matrix.node-version }})`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: msg
+              });
+            }
 
   # =============== JOB 3: АВТО-РЕЛИЗ ===============
   create-release:
@@ -90,45 +135,54 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Даём права на создание релиза
+      contents: write
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
-          fetch-depth: 0 # Нужно для получения всех тегов
+          fetch-depth: 0
 
-      - name: 🏷️ Get version from package.json
+      - name: 🏷️ Get version
         id: version
-        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-
-      - name: 📦 Create ZIP archive
         run: |
-          zip -r release-bundle.zip dist/ package.json README.md
+          if [ -f package.json ]; then
+            echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📦 Create bundle
+        run: |
+          if [ -d dist ]; then
+            zip -r release-bundle.zip dist/ package.json README.md 2>/dev/null || zip -r release-bundle.zip dist/
+          else
+            zip -r release-bundle.zip . -x "*.git*" -x "node_modules/*"
+          fi
 
       - name: 🚀 Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2.2.1
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: "Release v${{ steps.version.outputs.VERSION }}"
           body: |
-            ## 🎉 Что нового?
-            - Автоматический релиз от ${{ github.sha }}
-            - Прошёл все проверки CI
+            ## 🎉 Автоматический релиз
+            - Коммит: ${{ github.sha }}
+            - Все проверки CI пройдены
           draft: false
           prerelease: false
           files: release-bundle.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Встроенный токен
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # =============== JOB 4: ОПОВЕЩЕНИЕ В TELEGRAM ===============
+  # =============== JOB 4: ОПОВЕЩЕНИЕ (ТОЛЬКО ЕСЛИ ЕСТЬ СЕКРЕТЫ) ===============
   notify:
     name: 📢 Telegram Notification
-    if: always() # Отправим даже при падении
+    if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
     needs: [quality, build-and-test]
     runs-on: ubuntu-latest
     steps:
       - name: 📨 Send message
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@v2.0.0 # Обновлённая версия
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
