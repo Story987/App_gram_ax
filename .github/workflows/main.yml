@@ -26,7 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # =============== УСТАНАВЛИВАЕМ PYTHON И ЗАВИСИМОСТИ ===============
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
@@ -36,25 +35,22 @@ jobs:
         run: |
           pip install markdown
 
-      # =============== КОНВЕРТАЦИЯ ЧЕРЕЗ PYTHON (БЕЗОПАСНО) ===============
+      # =============== ОСНОВНОЙ ШАГ: КОНВЕРТАЦИЯ ===============
       - name: 🌐 Convert MD to HTML via Python
+        id: convert
         run: |
           echo "🌐 Конвертируем .md в .html с помощью Python..."
           mkdir -p html_output
           
-          # Создаём Python-скрипт для конвертации
           cat > convert.py << 'EOF'
           import os
-          import sys
           import markdown
           from pathlib import Path
 
-          # Настройки
           input_dir = "."
           output_dir = "html_output"
           excluded_dirs = ["node_modules", ".git"]
 
-          # Функция безопасного конвертирования
           def safe_convert(md_path):
               try:
                   with open(md_path, 'r', encoding='utf-8') as f:
@@ -64,83 +60,43 @@ jobs:
               except Exception as e:
                   return f"<p><b>Ошибка конвертации:</b> {str(e)}</p>", False
 
-          # Обходим все .md файлы
           for root, dirs, files in os.walk(input_dir):
-              # Пропускаем исключённые папки
               dirs[:] = [d for d in dirs if d not in excluded_dirs]
-              
               for file in files:
                   if file.endswith(".md"):
                       md_path = os.path.join(root, file)
                       rel_path = os.path.relpath(md_path, input_dir)
                       html_path = rel_path[:-3] + ".html"
                       target_path = os.path.join(output_dir, html_path)
-                      
-                      # Создаём папку
                       os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                      
-                      # Конвертируем
                       html_content, success = safe_convert(md_path)
-                      
-                      # Формируем полный HTML
                       title = os.path.basename(file)[:-3]
                       full_html = f"""<!DOCTYPE html>
                       <html>
-                      <head>
-                          <meta charset="UTF-8">
-                          <title>{title}</title>
-                          <style>
-                              body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
-                              h1, h2, h3 {{ color: #2c3e50; }}
-                              a {{ color: #3498db; }}
-                              code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }}
-                              pre {{ background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
-                              blockquote {{ border-left: 4px solid #3498db; padding-left: 20px; color: #555; }}
-                              img {{ max-width: 100%; }}
-                          </style>
-                      </head>
-                      <body>
-                          {html_content}
-                          <hr>
-                          <p><small>Сгенерировано из: {md_path}</small></p>
-                      </body>
+                      <head><meta charset="UTF-8"><title>{title}</title>
+                      <style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
+                      h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
+                      pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
+                      blockquote{{border-left:4px solid #3498db;padding-left:20px;color:#555}}img{{max-width:100%}}
+                      </style></head>
+                      <body>{html_content}<hr><p><small>Сгенерировано из: {md_path}</small></p></body>
                       </html>"""
-                      
                       with open(target_path, 'w', encoding='utf-8') as f:
                           f.write(full_html)
-                      
                       status = "✅" if success else "⚠️"
-                      print(f"{status} {md_path} → {target_path}")
+                      print(f"{status} {md_path}")
           EOF
 
-          # Запускаем скрипт
           python convert.py
           echo "✅ Конвертация завершена"
 
-      # =============== СОЗДАНИЕ ИНДЕКСА ===============
-      - name: 📋 Generate simple index
-        run: |
-          echo "# 📚 Документация" > INDEX.md
-          echo "" >> INDEX.md
-          echo "**Ветка:** ${{ github.ref_name }}" >> INDEX.md
-          echo "**Сгенерировано:** $(date '+%Y-%m-%d %H:%M:%S')" >> INDEX.md
-          echo "" >> INDEX.md
-          echo "## Файлы" >> INDEX.md
-          echo "" >> INDEX.md
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | sort | while read file; do
-            clean="${file#./}"
-            echo "- [$clean]($clean)" >> INDEX.md
-          done
-
-      # =============== СОХРАНЕНИЕ АРТЕФАКТОВ ===============
+      # =============== ТОЛЬКО СОХРАНЕНИЕ АРТЕФАКТОВ ===============
       - name: 📦 Upload artifacts
         uses: actions/upload-artifact@v4.4.3
         with:
           name: markdown-output-${{ github.ref_name }}
           path: |
-            *.md
             html_output/
-            INDEX.md
           retention-days: 7
 
       # =============== ПОДГОТОВКА К ДЕПЛОЮ ===============
@@ -157,31 +113,6 @@ jobs:
           mkdir -p "deploy_temp/$PREFIX"
           if [ -d "html_output" ]; then
             cp -r html_output/* "deploy_temp/$PREFIX" 2>/dev/null || true
-          fi
-          
-          if [ "${{ github.ref_name }}" == "main" ]; then
-            cat > deploy_temp/index.html << 'EOF'
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="UTF-8"><title>📚 Документация</title>
-            <style>body{font-family:sans-serif;max-width:800px;margin:auto;padding:2rem;line-height:1.6}
-            h1{color:#2c3e50}a{color:#3498db;text-decoration:none}
-            li{margin:0.5rem 0}
-            </style>
-            </head>
-            <body>
-            <h1>📚 Документация проекта</h1>
-            <p>Доступные версии:</p>
-            <ul>
-            <li><a href="/">Основная (main)</a></li>
-            <li><a href="/develop/">Разработка (develop)</a></li>
-            <li><a href="/branch_test1/">Тестовая (Ветка_Тест1)</a></li>
-            </ul>
-            <hr>
-            <p><small>Автоматическая сборка</small></p>
-            </body>
-            </html>
-            EOF
           fi
 
       # =============== ДЕПЛОЙ ===============
