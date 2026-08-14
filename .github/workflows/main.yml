@@ -1,102 +1,140 @@
-name: Digital Garden - Full Auto Index
+name: 🚀 Super CI Pipeline
 
 on:
   push:
-    branches: ["main"]
-    paths:
-      - 'src/site/notes/**'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Возможность запустить вручную из интерфейса GitHub
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # =============== JOB 1: КАЧЕСТВО КОДА ===============
+  quality:
+    name: 🧐 Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js (пример)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Run ESLint
+        run: npm run lint -- --max-warnings 0 # Строгий режим
+
+      - name: 💅 Check Prettier
+        run: npm run format:check
+
+  # =============== JOB 2: СБОРКА И ТЕСТЫ ===============
+  build-and-test:
+    name: 🏗️ Build & Test
+    needs: quality # Не запустится, пока не пройдёт линтер
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20] # Проверяем совместимость на двух версиях
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: 📦 Install deps
+        run: npm ci
+
+      - name: 🛠️ Build project
+        run: npm run build
+        env:
+          CI: true # Останавливаем сборку при варнингах
+
+      - name: 🧪 Run tests with coverage
+        run: npm run test:coverage
+
+      - name: 📊 Upload coverage to artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-node-${{ matrix.node-version }}
+          path: coverage/
+          retention-days: 7
+
+      - name: 💬 Post coverage comment (для PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const coverage = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json'));
+            const pct = coverage.total.lines.pct;
+            const msg = `✅ **Coverage:** ${pct}% (Node ${{ matrix.node-version }})`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: msg
+            });
+
+  # =============== JOB 3: АВТО-РЕЛИЗ ===============
+  create-release:
+    name: 🎯 Publish Release
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Даём права на создание релиза
+    steps:
+      - name: 📥 Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Нужно для получения всех тегов
 
-      - name: Scan EVERYTHING in notes folder
+      - name: 🏷️ Get version from package.json
+        id: version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: 📦 Create ZIP archive
         run: |
-          cd src/site/notes/
-          echo "🔎 Глубокое сканирование всех слоев реальности..."
-          
-          # Находим ВСЕ файлы, кроме самого индекса и служебных
-          # Мы берем и .md, и .html, и картинки, и папки
-          find . -type f ! -name "index.html" ! -name "files-list.txt" | sed 's|^\./||' | sort > files-list.txt
-          
-          echo "✅ Найдено объектов: $(wc -l < files-list.txt)"
+          zip -r release-bundle.zip dist/ package.json README.md
 
-      - name: Build Intelligent Index
-        run: |
-          cd src/site/notes
-          echo "🏗️ Сборка динамического интерфейса..."
-
-          # Пишем заголовок и стили
-          echo '<!DOCTYPE html><html lang="ru"><head>' > index.html
-          echo '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' >> index.html
-          echo '<title>🌿 Digital Garden Explorer</title>' >> index.html
-          echo '<style>' >> index.html
-          echo 'body { font-family: "Segoe UI", Tahoma, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; line-height: 1.6; }' >> index.html
-          echo '.container { max-width: 900px; margin: 0 auto; }' >> index.html
-          echo 'h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }' >> index.html
-          echo '.search { width: 100%; padding: 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #fff; margin-bottom: 20px; }' >> index.html
-          echo '.list { display: flex; flex-direction: column; gap: 8px; }' >> index.html
-          echo '.item { background: #161b22; padding: 12px 18px; border-radius: 6px; text-decoration: none; color: #58a6ff; border: 1px solid #30363d; display: flex; justify-content: space-between; transition: 0.2s; }' >> index.html
-          echo '.item:hover { background: #1c2128; border-color: #58a6ff; transform: translateX(5px); }' >> index.html
-          echo '.path { color: #8b949e; font-size: 0.85em; }' >> index.html
-          echo '.tag { font-size: 0.7em; background: #238636; color: white; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; }' >> index.html
-          echo '</style></head><body>' >> index.html
-
-          # Тело страницы
-          echo '<div class="container"><h1>🌿 Мой Цифровой Сад</h1>' >> index.html
-          echo '<input type="text" id="q" class="search" placeholder="Поиск по названию или папке...">' >> index.html
-          echo '<div id="files" class="list">Загрузка архивов...</div>' >> index.html
-          echo '<p style="text-align:center; opacity:0.3; margin-top:40px;">Авто-генерация: '$(date +'%Y-%m-%d %H:%M')'</p></div>' >> index.html
-
-          # Скрипт отображения
-          echo '<script>' >> index.html
-          echo 'async function start() {' >> index.html
-          echo '  const r = await fetch("files-list.txt");' >> index.html
-          echo '  const t = await r.json().catch(() => null) || (await r.text()).split("\\n").filter(f=>f.trim());' >> index.html
-          echo '  const div = document.getElementById("files");' >> index.html
-          echo '  const draw = (arr) => {' >> index.html
-          echo '    div.innerHTML = arr.map(f => {' >> index.html
-          echo '      const parts = f.split("/");' >> index.html
-          echo '      const name = parts.pop();' >> index.html
-          echo '      const path = parts.join("/") || "Корень";' >> index.html
-          echo '      const ext = name.split(".").pop();' >> index.html
-          echo '      return `<a href="${encodeURI(f)}" class="item">' >> index.html
-          echo '        <div><span class="path">${path} / </span><b>${name}</b></div>' >> index.html
-          echo '        <span class="tag">${ext}</span></a>`;' >> index.html
-          echo '    }).join("");' >> index.html
-          echo '  };' >> index.html
-          echo '  draw(t);' >> index.html
-          echo '  document.getElementById("q").oninput = (e) => {' >> index.html
-          echo '    const s = e.target.value.toLowerCase();' >> index.html
-          echo '    draw(t.filter(f => f.toLowerCase().includes(s)));' >> index.html
-          echo '  };' >> index.html
-          echo '}' >> index.html
-          echo 'start();' >> index.html
-          echo '</script></body></html>' >> index.html
-
-      - name: Upload
-        uses: actions/upload-pages-artifact@v3
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
-          path: 'src/site/notes/'
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: "Release v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## 🎉 Что нового?
+            - Автоматический релиз от ${{ github.sha }}
+            - Прошёл все проверки CI
+          draft: false
+          prerelease: false
+          files: release-bundle.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Встроенный токен
 
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+  # =============== JOB 4: ОПОВЕЩЕНИЕ В TELEGRAM ===============
+  notify:
+    name: 📢 Telegram Notification
+    if: always() # Отправим даже при падении
+    needs: [quality, build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📨 Send message
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🏗️ **Репозиторий:** ${{ github.repository }}
+            🔥 **Статус:** ${{ job.status }}
+            🌿 **Ветка:** ${{ github.ref_name }}
+            👤 **Автор:** ${{ github.actor }}
+            🔗 [Смотреть логи](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
