@@ -94,10 +94,16 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: 📁 Prepare for deployment
+      # ===================== ОБНОВЛЁННЫЙ ШАГ ДЕПЛОЯ =====================
+      - name: 📁 Prepare for deployment with dynamic index
         if: always()
         run: |
           mkdir -p deploy_temp
+          
+          # 1. Клонируем существующую gh-pages ветку, чтобы узнать другие ветки
+          git clone --depth 1 --branch gh-pages https://github.com/${{ github.repository }}.git gh-pages-existing 2>/dev/null || echo "ℹ️ Ветка gh-pages ещё не существует, создаём новую"
+          
+          # 2. Определяем префикс для текущей ветки
           if [ "${{ github.ref_name }}" == "main" ]; then
             PREFIX=""
           elif [ "${{ github.ref_name }}" == "develop" ]; then
@@ -107,9 +113,83 @@ jobs:
             SAFE_NAME=$(echo "$BRANCH_NAME" | sed 's/Ветка_/branch_/g' | sed 's/Тест/test/g' | tr '[:upper:]' '[:lower:]')
             PREFIX="${SAFE_NAME}/"
           fi
+          
+          # 3. Копируем новые HTML в папку с префиксом
           mkdir -p "deploy_temp/$PREFIX"
           if [ -d "html_output" ]; then
             cp -r html_output/* "deploy_temp/$PREFIX" 2>/dev/null || true
+          fi
+          
+          # 4. Копируем существующие папки из gh-pages (чтобы не потерять другие ветки)
+          if [ -d "gh-pages-existing" ]; then
+            # Копируем все папки, кроме текущей (чтобы обновить её свежими файлами)
+            find gh-pages-existing -maxdepth 1 -type d -not -path "ghapges-existing" -not -path "gh-pages-existing/.git" -not -path "gh-pages-existing/$PREFIX" | while read dir; do
+              folder=$(basename "$dir")
+              if [ -n "$folder" ] && [ "$folder" != "." ] && [ "$folder" != ".." ]; then
+                cp -r "$dir" "deploy_temp/" 2>/dev/null || true
+              fi
+            done
+            # Копируем существующий index.html, если он есть и мы не в main
+            if [ -f "gh-pages-existing/index.html" ] && [ "${{ github.ref_name }}" != "main" ]; then
+              cp "gh-pages-existing/index.html" "deploy_temp/index.html" 2>/dev/null || true
+            fi
+          fi
+          
+          # 5. Генерируем динамический index.html (для main или если его нет)
+          if [ "${{ github.ref_name }}" == "main" ] || [ ! -f "deploy_temp/index.html" ]; then
+            cat > deploy_temp/index.html << 'EOF'
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="UTF-8">
+              <title>📚 Документация проекта</title>
+              <style>
+                body { font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+                h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+                a { color: #3498db; text-decoration: none; }
+                a:hover { text-decoration: underline; }
+                ul { list-style: none; padding: 0; }
+                li { margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #3498db; }
+                li:hover { background: #e9ecef; }
+                .branch-name { font-weight: bold; color: #2c3e50; }
+                .branch-desc { color: #6c757d; font-size: 0.9em; }
+                .date { color: #6c757d; text-align: center; margin-top: 40px; font-size: 0.8em; border-top: 1px solid #dee2e6; padding-top: 20px; }
+              </style>
+            </head>
+            <body>
+              <h1>📚 Документация проекта</h1>
+              <p>Доступные версии документации из разных веток:</p>
+              <ul>
+            EOF
+            
+            # Сканируем папки в deploy_temp и добавляем ссылки
+            find deploy_temp -maxdepth 1 -type d -not -path "deploy_temp" -not -path "deploy_temp/.git" | sort | while read dir; do
+              folder=$(basename "$dir")
+              if [ -n "$folder" ] && [ "$folder" != "." ] && [ "$folder" != ".." ] && [ "$folder" != ".git" ]; then
+                # Проверяем, есть ли в папке html-файлы
+                if [ -n "$(find "$dir" -maxdepth 1 -name "*.html" 2>/dev/null | head -1)" ]; then
+                  # Определяем имя ветки
+                  if [ "$folder" == "develop" ]; then
+                    BRANCH_NAME="develop"
+                    DESC="(ветка разработки)"
+                  elif [ "$folder" == "branch_test1" ]; then
+                    BRANCH_NAME="Ветка_Тест1"
+                    DESC="(тестовая ветка)"
+                  else
+                    BRANCH_NAME="$folder"
+                    DESC=""
+                  fi
+                  echo "                <li><span class=\"branch-name\"><a href=\"/$folder/\">$BRANCH_NAME</a></span> <span class=\"branch-desc\">$DESC</span></li>" >> deploy_temp/index.html
+                fi
+              fi
+            done
+            
+            cat >> deploy_temp/index.html << 'EOF'
+              </ul>
+              <div class="date">Автоматическая сборка: $(date '+%Y-%m-%d %H:%M:%S')</div>
+            </body>
+            </html>
+            EOF
           fi
 
       - name: 🚀 Deploy to gh-pages branch
@@ -122,11 +202,7 @@ jobs:
           keep_files: true
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: '📝 Деплой ветки ${{ github.ref_name }}'
-
-  # =============== ЭТА ДЖОБА УДАЛЕНА ===============
-  # deploy-pages:   <--- БОЛЬШЕ НЕ НУЖНА
-  #   ...
+          commit_message: '📝 Деплой ветки ${{ github.ref_name }} (с динамическим индексом)'
 
   check-links:
     name: 🔗 Проверка битых ссылок
