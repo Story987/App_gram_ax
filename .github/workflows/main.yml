@@ -7,33 +7,35 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Разрешаем деплой на GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
-  # =============== ОСНОВНАЯ ДЖОБА: ПРОВЕРКА И КОНВЕРТАЦИЯ ===============
+  # =============== JOB 1: ПРОВЕРКА И КОНВЕРТАЦИЯ ===============
   markdown-processing:
     name: 🔍 Проверка и конвертация .md файлов
     runs-on: ubuntu-latest
     
     steps:
-      # 1. Загружаем код (используем последнюю стабильную версию)
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
-      # 2. Устанавливаем Node.js (используем LTS версию без deprecated)
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4.3.0
         with:
           node-version: '22'
 
-      # 3. Устанавливаем утилиты для работы с Markdown
       - name: 📦 Install markdown tools
         run: |
           npm install -g markdownlint-cli
           npm install -g marked
           npm install -g prettier
 
-      # 4. Проверка стиля Markdown (линтер) - не падаем при ошибках
       - name: 🔍 Lint Markdown files
         continue-on-error: true
         run: |
@@ -41,7 +43,6 @@ jobs:
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 markdownlint || true
           echo "✅ Проверка завершена"
 
-      # 5. Форматирование Markdown (авто-исправление)
       - name: 💅 Format Markdown files
         continue-on-error: true
         run: |
@@ -49,26 +50,18 @@ jobs:
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 prettier --write --prose-wrap=always || true
           echo "✅ Форматирование завершено"
 
-      # 6. Конвертация .md в .html
       - name: 🌐 Convert MD to HTML
         run: |
           echo "🌐 Конвертируем .md в .html..."
           mkdir -p html_output
-          # Находим все .md файлы и конвертируем их
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
-            # Определяем имя файла без расширения
-            filename=$(basename "$file" .md)
-            # Определяем путь относительно корня
             relpath=$(realpath --relative-to="." "$file" | sed 's/\.md$//')
-            # Создаём структуру папок
             mkdir -p "html_output/$(dirname "$relpath")"
-            # Конвертируем
             marked "$file" > "html_output/${relpath}.html"
             echo "  ✅ ${file} → html_output/${relpath}.html"
           done
           echo "✅ Конвертация завершена"
 
-      # 7. Генерация индекса (список всех .md файлов)
       - name: 📋 Generate Markdown index
         run: |
           echo "📋 Генерируем индекс всех .md файлов..."
@@ -79,13 +72,11 @@ jobs:
           echo "| Файл | Путь |" >> INDEX.md
           echo "|------|------|" >> INDEX.md
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | sort | while read file; do
-            # Убираем ./ в начале
             clean_file="${file#./}"
             echo "| [${clean_file}](${clean_file}) | \`${clean_file}\` |" >> INDEX.md
           done
           echo "✅ Индекс создан: INDEX.md"
 
-      # 8. Сохраняем результаты как артефакт
       - name: 📦 Upload artifacts
         uses: actions/upload-artifact@v4.4.3
         with:
@@ -96,14 +87,65 @@ jobs:
             INDEX.md
           retention-days: 30
 
-  # =============== ДЖОБА: ПРОВЕРКА ССЫЛОК (ОПЦИОНАЛЬНО) ===============
+      # =============== НОВЫЙ ШАГ: ПОДГОТОВКА К ДЕПЛОЮ ===============
+      - name: 📁 Prepare for GitHub Pages
+        run: |
+          # Создаём папку для деплоя
+          mkdir -p pages_output
+          # Копируем все HTML и добавляем красивый индекс
+          cp -r html_output/* pages_output/
+          # Создаём главную страницу index.html
+          cat > pages_output/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><title>📚 Документация</title>
+          <style>body{font-family:sans-serif;max-width:800px;margin:auto;padding:2rem;line-height:1.6}
+          h1{color:#2c3e50}a{color:#3498db;text-decoration:none}a:hover{text-decoration:underline}
+          li{margin:0.5rem 0}
+          .file-size{color:#7f8c8d;font-size:0.9rem}
+          </style>
+          </head>
+          <body>
+          <h1>📚 Документация из Markdown</h1>
+          <p>Сгенерировано автоматически из <code>.md</code> файлов репозитория.</p>
+          <hr>
+          <ul>
+          EOF
+          # Добавляем ссылки на все HTML
+          find pages_output -name "*.html" -not -name "index.html" | sort | while read file; do
+            # Убираем pages_output/ из пути
+            rel="${file#pages_output/}"
+            # Получаем имя без расширения
+            name=$(basename "$rel" .html)
+            echo "<li><a href=\"$rel\">$name</a> <span class=\"file-size\">(.html)</span></li>" >> pages_output/index.html
+          done
+          echo '</ul><hr><p><small>Автоматическая сборка от $(date)</small></p></body></html>' >> pages_output/index.html
+
+      - name: 📤 Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_output
+
+  # =============== JOB 2: ДЕПЛОЙ НА GITHUB PAGES ===============
+  deploy:
+    name: 🚀 Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: markdown-processing
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 🚀 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # =============== JOB 3: ПРОВЕРКА ССЫЛОК (ОПЦИОНАЛЬНО) ===============
   check-links:
     name: 🔗 Проверка битых ссылок
     runs-on: ubuntu-latest
     needs: markdown-processing
-    # Пропускаем, если предыдущая джоба была отменена или не запускалась
     if: always() && needs.markdown-processing.result != 'cancelled'
-    
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
@@ -116,4 +158,4 @@ jobs:
           folder-path: '.'
           file-path: '*.md'
           max-depth: 2
-        continue-on-error: true  # Не падаем, если есть битые ссылки
+        continue-on-error: true
