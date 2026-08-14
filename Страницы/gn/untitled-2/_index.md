@@ -12,4 +12,10 @@ order: 0.5
 
 
 
+Изображение Логика Связи
+
+![](./_index.jpeg){width=1713px height=924px}
+
+
+
 !\[\](./\_index.jpeg)\{width=1713px height=924px}
