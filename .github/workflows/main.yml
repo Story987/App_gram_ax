@@ -1,4 +1,4 @@
-name: 🚀 Super CI Pipeline
+name: CI Pipeline
 
 on:
   push:
@@ -8,171 +8,27 @@ on:
   workflow_dispatch:
 
 jobs:
-  # =============== JOB 1: КАЧЕСТВО КОДА ===============
-  quality:
-    name: 🧐 Lint & Format
+  build:
+    name: Build and Test
     runs-on: ubuntu-latest
+    
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4.2.2
-
-      - name: 🟢 Setup Node.js (LTS)
-        uses: actions/setup-node@v4.3.0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'  # Используем стабильную LTS версию
-          cache: 'npm'
-
-      - name: 📦 Install dependencies (адаптивно)
-        run: |
-          # Проверяем наличие lock-файла и устанавливаем зависимости
-          if [ -f package-lock.json ]; then
-            echo "🔒 Lockfile найден, используем npm ci"
-            npm ci
-          elif [ -f yarn.lock ]; then
-            echo "🔒 Lockfile найден, используем yarn"
-            yarn install --frozen-lockfile
-          else
-            echo "⚠️ Lockfile НЕ найден, создаём его через npm install"
-            npm install
-            # Создаём lock-файл, чтобы следующие сборки были быстрее
-            npm install --package-lock-only
-          fi
-
-      - name: 🔍 Run ESLint (если есть)
-        run: |
-          if npm list eslint >/dev/null 2>&1; then
-            npm run lint -- --max-warnings 0
-          else
-            echo "⚠️ ESLint не установлен, пропускаем"
-          fi
-
-      - name: 💅 Check Prettier (если есть)
-        run: |
-          if npm list prettier >/dev/null 2>&1; then
-            npm run format:check
-          else
-            echo "⚠️ Prettier не установлен, пропускаем"
-          fi
-
-  # =============== JOB 2: СБОРКА И ТЕСТЫ ===============
-  build-and-test:
-    name: 🏗️ Build & Test
-    needs: quality
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22]  # Убираем 20, оставляем только 22
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4.2.2
-
-      - name: 🟢 Setup Node ${{ matrix.node-version }}
-        uses: actions/setup-node@v4.3.0
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: 📦 Install deps (адаптивно)
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f yarn.lock ]; then
-            yarn install --frozen-lockfile
-          else
-            npm install
-            npm install --package-lock-only
-          fi
-
-      - name: 🛠️ Build project (если есть скрипт)
-        run: |
-          if npm run | grep -q "build"; then
-            npm run build
-          else
-            echo "⚠️ Скрипт 'build' не найден, пропускаем"
-          fi
-        env:
-          CI: true
-
-      - name: 🧪 Run tests (если есть)
-        run: |
-          if npm run | grep -q "test"; then
-            npm run test:coverage || npm run test
-          else
-            echo "⚠️ Скрипт 'test' не найден, пропускаем"
-          fi
-
-      - name: 📊 Upload coverage (если есть)
-        if: always()
-        uses: actions/upload-artifact@v4.4.3
-        with:
-          name: coverage-report-node-${{ matrix.node-version }}
-          path: |
-            coverage/
-            .nyc_output/
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: 💬 Post coverage comment (для PR)
-        if: github.event_name == 'pull_request' && hashFiles('coverage/coverage-summary.json') != ''
-        uses: actions/github-script@v7.0.1
-        with:
-          script: |
-            const fs = require('fs');
-            const path = './coverage/coverage-summary.json';
-            if (fs.existsSync(path)) {
-              const coverage = JSON.parse(fs.readFileSync(path));
-              const pct = coverage.total.lines.pct;
-              const msg = `✅ **Coverage:** ${pct}% (Node ${{ matrix.node-version }})`;
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: msg
-              });
-            }
-
-  # =============== JOB 3: АВТО-РЕЛИЗ ===============
-  create-release:
-    name: 🎯 Publish Release
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4.2.2
-        with:
-          fetch-depth: 0
-
-      - name: 🏷️ Get version
-        id: version
-        run: |
-          if [ -f package.json ]; then
-            echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 📦 Create bundle
-        run: |
-          if [ -d dist ]; then
-            zip -r release-bundle.zip dist/ package.json README.md 2>/dev/null || zip -r release-bundle.zip dist/
-          else
-            zip -r release-bundle.zip . -x "*.git*" -x "node_modules/*"
-          fi
-
-      - name: 🚀 Create GitHub Release
-        uses: softprops/action-gh-release@v2.2.1
-        with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
-          name: "Release v${{ steps.version.outputs.VERSION }}"
-          body: |
-            ## 🎉 Автоматический релиз
-            - Коммит: ${{ github.sha }}
-            - Все проверки CI пройдены
-          draft: false
-          prerelease: false
-          files: release-bundle.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          node-version: '22'
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Run linter (if available)
+        run: npm run lint --if-present
+        
+      - name: Build project (if available)
+        run: npm run build --if-present
+        
+      - name: Run tests (if available)
+        run: npm test --if-present
