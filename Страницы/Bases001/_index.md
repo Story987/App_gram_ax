@@ -37,4 +37,4 @@ vektor Автор
 
 Изображение Логика Связи
 
-![](./Bases001.jpeg){width=1713px height=924px}
+![](./_index.jpeg){width=1713px height=924px}
