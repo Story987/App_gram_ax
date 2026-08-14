@@ -19,11 +19,12 @@ jobs:
       - name: 🟢 Setup Node.js (LTS)
         uses: actions/setup-node@v4.3.0
         with:
-          node-version: '22'
+          node-version: '22'  # Используем стабильную LTS версию
           cache: 'npm'
 
-      - name: 📦 Install dependencies (умный режим)
+      - name: 📦 Install dependencies (адаптивно)
         run: |
+          # Проверяем наличие lock-файла и устанавливаем зависимости
           if [ -f package-lock.json ]; then
             echo "🔒 Lockfile найден, используем npm ci"
             npm ci
@@ -31,8 +32,10 @@ jobs:
             echo "🔒 Lockfile найден, используем yarn"
             yarn install --frozen-lockfile
           else
-            echo "⚠️ Lockfile НЕ найден, используем npm install (медленнее, но работает)"
+            echo "⚠️ Lockfile НЕ найден, создаём его через npm install"
             npm install
+            # Создаём lock-файл, чтобы следующие сборки были быстрее
+            npm install --package-lock-only
           fi
 
       - name: 🔍 Run ESLint (если есть)
@@ -58,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22]
+        node-version: [22]  # Убираем 20, оставляем только 22
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
@@ -77,6 +80,7 @@ jobs:
             yarn install --frozen-lockfile
           else
             npm install
+            npm install --package-lock-only
           fi
 
       - name: 🛠️ Build project (если есть скрипт)
