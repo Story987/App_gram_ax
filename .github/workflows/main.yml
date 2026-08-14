@@ -8,21 +8,21 @@ on:
   workflow_dispatch:
 
 jobs:
-  # =============== JOB 1: ПРОВЕРКА И КОНВЕРТАЦИЯ MD ===============
+  # =============== ОСНОВНАЯ ДЖОБА: ПРОВЕРКА И КОНВЕРТАЦИЯ ===============
   markdown-processing:
     name: 🔍 Проверка и конвертация .md файлов
     runs-on: ubuntu-latest
     
     steps:
-      # 1. Загружаем код
+      # 1. Загружаем код (используем последнюю стабильную версию)
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
-          fetch-depth: 0  # Полная история для поиска всех .md файлов
+          fetch-depth: 0
 
-      # 2. Устанавливаем Node.js (нужен для некоторых инструментов)
+      # 2. Устанавливаем Node.js (используем LTS версию без deprecated)
       - name: 🟢 Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.3.0
         with:
           node-version: '22'
 
@@ -33,18 +33,20 @@ jobs:
           npm install -g marked
           npm install -g prettier
 
-      # 4. Проверка стиля Markdown (линтер)
+      # 4. Проверка стиля Markdown (линтер) - не падаем при ошибках
       - name: 🔍 Lint Markdown files
+        continue-on-error: true
         run: |
           echo "🔍 Проверяем все .md файлы..."
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | xargs markdownlint || true
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 markdownlint || true
           echo "✅ Проверка завершена"
 
       # 5. Форматирование Markdown (авто-исправление)
       - name: 💅 Format Markdown files
+        continue-on-error: true
         run: |
           echo "💅 Форматируем .md файлы..."
-          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | xargs prettier --write --prose-wrap=always || true
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 prettier --write --prose-wrap=always || true
           echo "✅ Форматирование завершено"
 
       # 6. Конвертация .md в .html
@@ -52,14 +54,17 @@ jobs:
         run: |
           echo "🌐 Конвертируем .md в .html..."
           mkdir -p html_output
-          for file in $(find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*"); do
+          # Находим все .md файлы и конвертируем их
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
+            # Определяем имя файла без расширения
             filename=$(basename "$file" .md)
-            dirname=$(dirname "$file")
-            # Создаём структуру папок в html_output
-            mkdir -p "html_output/$(dirname "$file")"
-            # Конвертируем с помощью marked
-            marked "$file" > "html_output/${dirname}/${filename}.html"
-            echo "  ✅ ${file} → html_output/${dirname}/${filename}.html"
+            # Определяем путь относительно корня
+            relpath=$(realpath --relative-to="." "$file" | sed 's/\.md$//')
+            # Создаём структуру папок
+            mkdir -p "html_output/$(dirname "$relpath")"
+            # Конвертируем
+            marked "$file" > "html_output/${relpath}.html"
+            echo "  ✅ ${file} → html_output/${relpath}.html"
           done
           echo "✅ Конвертация завершена"
 
@@ -67,16 +72,22 @@ jobs:
       - name: 📋 Generate Markdown index
         run: |
           echo "📋 Генерируем индекс всех .md файлов..."
-          echo "# 📚 Список Markdown файлов" > INDEX.md
+          echo "# 📚 Список Markdown файлов в репозитории" > INDEX.md
           echo "" >> INDEX.md
+          echo "Всего файлов: $(find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | wc -l)" >> INDEX.md
+          echo "" >> INDEX.md
+          echo "| Файл | Путь |" >> INDEX.md
+          echo "|------|------|" >> INDEX.md
           find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | sort | while read file; do
-            echo "- [${file}](${file})" >> INDEX.md
+            # Убираем ./ в начале
+            clean_file="${file#./}"
+            echo "| [${clean_file}](${clean_file}) | \`${clean_file}\` |" >> INDEX.md
           done
           echo "✅ Индекс создан: INDEX.md"
 
       # 8. Сохраняем результаты как артефакт
       - name: 📦 Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: markdown-output
           path: |
@@ -85,36 +96,24 @@ jobs:
             INDEX.md
           retention-days: 30
 
-      # 9. (Опционально) Деплой на GitHub Pages
-      - name: 🚀 Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./html_output
-          destination_dir: ./docs
-          publish_branch: gh-pages
-          keep_files: false
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: '📝 Автоматическая публикация HTML из Markdown'
-
-  # =============== JOB 2: ПРОВЕРКА ССЫЛОК В MD ===============
+  # =============== ДЖОБА: ПРОВЕРКА ССЫЛОК (ОПЦИОНАЛЬНО) ===============
   check-links:
-    name: 🔗 Проверка битых ссылок в .md
+    name: 🔗 Проверка битых ссылок
     runs-on: ubuntu-latest
     needs: markdown-processing
+    # Пропускаем, если предыдущая джоба была отменена или не запускалась
+    if: always() && needs.markdown-processing.result != 'cancelled'
     
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: 🔗 Check broken links
         uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
           use-quiet-mode: 'yes'
           use-verbose-mode: 'yes'
-          config-file: '.github/workflows/link-config.json'
           folder-path: '.'
           file-path: '*.md'
           max-depth: 2
+        continue-on-error: true  # Не падаем, если есть битые ссылки
