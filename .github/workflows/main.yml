@@ -14,13 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4.2.2 # Фиксированная стабильная версия
+        uses: actions/checkout@v4.2.2
 
       - name: 🟢 Setup Node.js (LTS)
-        uses: actions/setup-node@v4.3.0 # Актуальная версия
+        uses: actions/setup-node@v4.3.0
         with:
-          node-version: '22' # Используем актуальную LTS
-          # Кеширование будет работать ТОЛЬКО если есть lock-файл
+          node-version: '22'
           cache: 'npm'
 
       - name: 📦 Install dependencies (умный режим)
@@ -59,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22] # Проверяем на двух LTS
+        node-version: [20, 22]
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4.2.2
@@ -82,7 +81,7 @@ jobs:
 
       - name: 🛠️ Build project (если есть скрипт)
         run: |
-          if npm list | grep -q "build"; then
+          if npm run | grep -q "build"; then
             npm run build
           else
             echo "⚠️ Скрипт 'build' не найден, пропускаем"
@@ -92,7 +91,7 @@ jobs:
 
       - name: 🧪 Run tests (если есть)
         run: |
-          if npm list | grep -q "test"; then
+          if npm run | grep -q "test"; then
             npm run test:coverage || npm run test
           else
             echo "⚠️ Скрипт 'test' не найден, пропускаем"
@@ -174,7 +173,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # =============== JOB 4: ОПОВЕЩЕНИЕ (ТОЛЬКО ЕСЛИ ЕСТЬ СЕКРЕТЫ) ===============
+  # =============== JOB 4: ОПОВЕЩЕНИЕ (ИСПРАВЛЕННЫЙ) ===============
   notify:
     name: 📢 Telegram Notification
     if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
@@ -182,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📨 Send message
-        uses: appleboy/telegram-action@v2.0.0 # Обновлённая версия
+        uses: appleboy/telegram-action@v2.0.0
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
