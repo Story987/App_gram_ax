@@ -1,10 +1,15 @@
-name: Digital Garden - Full Auto Index
+name: 📝 Markdown Pipeline
 
 on:
   push:
-    branches: ["main"]
-    paths:
-      - 'src/site/notes/**'
+    branches:
+      - main
+      - develop
+      - 'Ветка_Тест1'          # Добавлена ваша тестовая ветка
+      - '**'                   # Опционально: можно раскомментировать для всех веток
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -12,91 +17,141 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  markdown-processing:
+    name: 🔍 Проверка и конвертация .md файлов
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: 📥 Checkout
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Scan EVERYTHING in notes folder
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4.3.0
+        with:
+          node-version: '22'
+
+      - name: 📦 Install markdown tools
         run: |
-          cd src/site/notes/
-          echo "🔎 Глубокое сканирование всех слоев реальности..."
-          
-          # Находим ВСЕ файлы, кроме самого индекса и служебных
-          # Мы берем и .md, и .html, и картинки, и папки
-          find . -type f ! -name "index.html" ! -name "files-list.txt" | sed 's|^\./||' | sort > files-list.txt
-          
-          echo "✅ Найдено объектов: $(wc -l < files-list.txt)"
+          npm install -g markdownlint-cli
+          npm install -g marked
+          npm install -g prettier
 
-      - name: Build Intelligent Index
+      - name: 🔍 Lint Markdown files
+        continue-on-error: true
         run: |
-          cd src/site/notes
-          echo "🏗️ Сборка динамического интерфейса..."
+          echo "🔍 Проверяем все .md файлы..."
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 markdownlint || true
+          echo "✅ Проверка завершена"
 
-          # Пишем заголовок и стили
-          echo '<!DOCTYPE html><html lang="ru"><head>' > index.html
-          echo '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' >> index.html
-          echo '<title>🌿 Digital Garden Explorer</title>' >> index.html
-          echo '<style>' >> index.html
-          echo 'body { font-family: "Segoe UI", Tahoma, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; line-height: 1.6; }' >> index.html
-          echo '.container { max-width: 900px; margin: 0 auto; }' >> index.html
-          echo 'h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }' >> index.html
-          echo '.search { width: 100%; padding: 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #fff; margin-bottom: 20px; }' >> index.html
-          echo '.list { display: flex; flex-direction: column; gap: 8px; }' >> index.html
-          echo '.item { background: #161b22; padding: 12px 18px; border-radius: 6px; text-decoration: none; color: #58a6ff; border: 1px solid #30363d; display: flex; justify-content: space-between; transition: 0.2s; }' >> index.html
-          echo '.item:hover { background: #1c2128; border-color: #58a6ff; transform: translateX(5px); }' >> index.html
-          echo '.path { color: #8b949e; font-size: 0.85em; }' >> index.html
-          echo '.tag { font-size: 0.7em; background: #238636; color: white; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; }' >> index.html
-          echo '</style></head><body>' >> index.html
+      - name: 💅 Format Markdown files
+        continue-on-error: true
+        run: |
+          echo "💅 Форматируем .md файлы..."
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | xargs -0 prettier --write --prose-wrap=always || true
+          echo "✅ Форматирование завершено"
 
-          # Тело страницы
-          echo '<div class="container"><h1>🌿 Мой Цифровой Сад</h1>' >> index.html
-          echo '<input type="text" id="q" class="search" placeholder="Поиск по названию или папке...">' >> index.html
-          echo '<div id="files" class="list">Загрузка архивов...</div>' >> index.html
-          echo '<p style="text-align:center; opacity:0.3; margin-top:40px;">Авто-генерация: '$(date +'%Y-%m-%d %H:%M')'</p></div>' >> index.html
+      - name: 🌐 Convert MD to HTML
+        run: |
+          echo "🌐 Конвертируем .md в .html..."
+          mkdir -p html_output
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
+            relpath=$(realpath --relative-to="." "$file" | sed 's/\.md$//')
+            mkdir -p "html_output/$(dirname "$relpath")"
+            marked "$file" > "html_output/${relpath}.html"
+            echo "  ✅ ${file} → html_output/${relpath}.html"
+          done
+          echo "✅ Конвертация завершена"
 
-          # Скрипт отображения
-          echo '<script>' >> index.html
-          echo 'async function start() {' >> index.html
-          echo '  const r = await fetch("files-list.txt");' >> index.html
-          echo '  const t = await r.json().catch(() => null) || (await r.text()).split("\\n").filter(f=>f.trim());' >> index.html
-          echo '  const div = document.getElementById("files");' >> index.html
-          echo '  const draw = (arr) => {' >> index.html
-          echo '    div.innerHTML = arr.map(f => {' >> index.html
-          echo '      const parts = f.split("/");' >> index.html
-          echo '      const name = parts.pop();' >> index.html
-          echo '      const path = parts.join("/") || "Корень";' >> index.html
-          echo '      const ext = name.split(".").pop();' >> index.html
-          echo '      return `<a href="${encodeURI(f)}" class="item">' >> index.html
-          echo '        <div><span class="path">${path} / </span><b>${name}</b></div>' >> index.html
-          echo '        <span class="tag">${ext}</span></a>`;' >> index.html
-          echo '    }).join("");' >> index.html
-          echo '  };' >> index.html
-          echo '  draw(t);' >> index.html
-          echo '  document.getElementById("q").oninput = (e) => {' >> index.html
-          echo '    const s = e.target.value.toLowerCase();' >> index.html
-          echo '    draw(t.filter(f => f.toLowerCase().includes(s)));' >> index.html
-          echo '  };' >> index.html
-          echo '}' >> index.html
-          echo 'start();' >> index.html
-          echo '</script></body></html>' >> index.html
+      - name: 📋 Generate Markdown index
+        run: |
+          echo "📋 Генерируем индекс всех .md файлов..."
+          echo "# 📚 Список Markdown файлов в репозитории" > INDEX.md
+          echo "" >> INDEX.md
+          echo "**Ветка:** ${{ github.ref_name }}" >> INDEX.md
+          echo "**Всего файлов:** $(find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | wc -l)" >> INDEX.md
+          echo "" >> INDEX.md
+          echo "| Файл | Путь |" >> INDEX.md
+          echo "|------|------|" >> INDEX.md
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | sort | while read file; do
+            clean_file="${file#./}"
+            echo "| [${clean_file}](${clean_file}) | \`${clean_file}\` |" >> INDEX.md
+          done
+          echo "✅ Индекс создан: INDEX.md"
 
-      - name: Upload
+      - name: 📦 Upload artifacts
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: markdown-output-${{ github.ref_name }}  # Уникальное имя для каждой ветки
+          path: |
+            *.md
+            html_output/
+            INDEX.md
+          retention-days: 30
+
+      - name: 📁 Prepare for GitHub Pages (только для main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p pages_output
+          cp -r html_output/* pages_output/
+          cat > pages_output/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><title>📚 Документация</title>
+          <style>body{font-family:sans-serif;max-width:800px;margin:auto;padding:2rem;line-height:1.6}
+          h1{color:#2c3e50}a{color:#3498db;text-decoration:none}a:hover{text-decoration:underline}
+          li{margin:0.5rem 0}
+          .file-size{color:#7f8c8d;font-size:0.9rem}
+          </style>
+          </head>
+          <body>
+          <h1>📚 Документация из Markdown</h1>
+          <p>Сгенерировано автоматически из <code>.md</code> файлов репозитория.</p>
+          <hr>
+          <ul>
+          EOF
+          find pages_output -name "*.html" -not -name "index.html" | sort | while read file; do
+            rel="${file#pages_output/}"
+            name=$(basename "$rel" .html)
+            echo "<li><a href=\"$rel\">$name</a> <span class=\"file-size\">(.html)</span></li>" >> pages_output/index.html
+          done
+          echo '</ul><hr><p><small>Автоматическая сборка от $(date)</small></p></body></html>' >> pages_output/index.html
+
+      - name: 📤 Upload Pages artifact (только для main)
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'src/site/notes/'
+          path: pages_output
 
-      - name: Deploy
+  deploy:
+    name: 🚀 Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: markdown-processing
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 🚀 Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  check-links:
+    name: 🔗 Проверка битых ссылок
+    runs-on: ubuntu-latest
+    needs: markdown-processing
+    if: always() && needs.markdown-processing.result != 'cancelled'
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: 🔗 Check broken links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          folder-path: '.'
+          file-path: '*.md'
+          max-depth: 2
+        continue-on-error: true
