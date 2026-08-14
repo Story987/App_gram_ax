@@ -172,22 +172,3 @@ jobs:
           files: release-bundle.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # =============== JOB 4: ОПОВЕЩЕНИЕ (ИСПРАВЛЕННЫЙ) ===============
-  notify:
-    name: 📢 Telegram Notification
-    if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
-    needs: [quality, build-and-test]
-    runs-on: ubuntu-latest
-    steps:
-      - name: 📨 Send message
-        uses: appleboy/telegram-action@v2.0.0
-        with:
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: |
-            🏗️ **Репозиторий:** ${{ github.repository }}
-            🔥 **Статус:** ${{ job.status }}
-            🌿 **Ветка:** ${{ github.ref_name }}
-            👤 **Автор:** ${{ github.actor }}
-            🔗 [Смотреть логи](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
