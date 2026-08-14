@@ -1,7 +1,7 @@
 ---
 title: Страница 1
 description: Домашняя
-order: 1
+order: 2
 aliases:
   - moved: "2026-08-14T16:47:11Z"
     path: ooo
