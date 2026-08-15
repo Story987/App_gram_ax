@@ -35,14 +35,11 @@ jobs:
         run: |
           pip install markdown
 
-      # =============== КОНВЕРТАЦИЯ ТОЛЬКО ИЗ ПАПКИ SITE ===============
       - name: 🌐 Convert MD to HTML from Site folder
-        id: convert
         run: |
           echo "🌐 Конвертируем .md файлы из папки Site..."
           mkdir -p html_output
           
-          # Проверяем, существует ли папка Site
           if [ ! -d "./Site" ]; then
             echo "❌ Папка Site не найдена!"
             exit 1
@@ -66,53 +63,29 @@ jobs:
               except Exception as e:
                   return f"<p><b>Ошибка конвертации:</b> {str(e)}</p>", False
 
-          # Обходим только папку Site
           for root, dirs, files in os.walk(input_dir):
-              # Пропускаем исключённые папки
               dirs[:] = [d for d in dirs if d not in excluded_dirs]
-              
               for file in files:
                   if file.endswith(".md"):
                       md_path = os.path.join(root, file)
-                      # Получаем путь относительно Site
                       rel_path = os.path.relpath(md_path, input_dir)
                       html_path = rel_path[:-3] + ".html"
                       target_path = os.path.join(output_dir, html_path)
-                      
-                      # Создаём папку
                       os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                      
-                      # Конвертируем
                       html_content, success = safe_convert(md_path)
-                      
-                      # Формируем полный HTML
                       title = os.path.basename(file)[:-3]
                       full_html = f"""<!DOCTYPE html>
                       <html>
-                      <head>
-                          <meta charset="UTF-8">
-                          <title>{title}</title>
-                          <style>
-                              body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
-                              h1, h2, h3 {{ color: #2c3e50; }}
-                              a {{ color: #3498db; text-decoration: none; }}
-                              a:hover {{ text-decoration: underline; }}
-                              code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }}
-                              pre {{ background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
-                              blockquote {{ border-left: 4px solid #3498db; padding-left: 20px; color: #555; }}
-                              img {{ max-width: 100%; }}
-                          </style>
-                      </head>
-                      <body>
-                          {html_content}
-                          <hr>
-                          <p><small>Сгенерировано из: Site/{rel_path}</small></p>
-                      </body>
+                      <head><meta charset="UTF-8"><title>{title}</title>
+                      <style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
+                      h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
+                      pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
+                      blockquote{{border-left:4px solid #3498db;padding-left:20px;color:#555}}img{{max-width:100%}}
+                      </style></head>
+                      <body>{html_content}<hr><p><small>Сгенерировано из: Site/{rel_path}</small></p></body>
                       </html>"""
-                      
                       with open(target_path, 'w', encoding='utf-8') as f:
                           f.write(full_html)
-                      
                       status = "✅" if success else "⚠️"
                       print(f"{status} Site/{rel_path} → {html_path}")
           EOF
@@ -120,41 +93,25 @@ jobs:
           python convert.py
           echo "✅ Конвертация завершена"
 
-      # =============== ГЕНЕРАЦИЯ ИНДЕКСА ===============
       - name: 📋 Generate index from Site folder
         run: |
           echo "📋 Генерируем индекс из папки Site..."
-          
           cat > html_output/index.html << 'EOF'
           <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="UTF-8">
-              <title>📚 Документация</title>
-              <style>
-                  body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
-                  h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
-                  a { color: #3498db; text-decoration: none; }
-                  a:hover { text-decoration: underline; }
-                  ul { list-style: none; padding: 0; }
-                  li { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #3498db; }
-                  li:hover { background: #e9ecef; }
-                  .folder { font-weight: bold; color: #2c3e50; margin-top: 20px; }
-                  .date { color: #6c757d; text-align: center; margin-top: 40px; font-size: 0.8em; border-top: 1px solid #dee2e6; padding-top: 20px; }
-              </style>
-          </head>
-          <body>
-              <h1>📚 Документация</h1>
-              <p>Страницы из папки <code>Site</code>:</p>
-              <ul>
+          <html><head><meta charset="UTF-8"><title>📚 Документация</title>
+          <style>body{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}
+          h1{color:#2c3e50;border-bottom:3px solid #3498db;padding-bottom:10px}
+          a{color:#3498db;text-decoration:none}a:hover{text-decoration:underline}
+          ul{list-style:none;padding:0}li{margin:10px 0;padding:10px;background:#f8f9fa;border-radius:8px;border-left:4px solid #3498db}
+          .folder{font-weight:bold;color:#2c3e50;margin-top:20px}
+          .date{color:#6c757d;text-align:center;margin-top:40px;font-size:0.8em;border-top:1px solid #dee2e6;padding-top:20px}
+          </style></head><body>
+          <h1>📚 Документация</h1><p>Страницы из папки <code>Site</code>:</p><ul>
           EOF
 
-          # Сортируем и добавляем ссылки
           find html_output -name "*.html" -not -name "index.html" | sort | while read file; do
-            # Убираем html_output/ и .html
             rel="${file#html_output/}"
             name="${rel%.html}"
-            # Определяем, есть ли папка
             if [[ "$name" == *"/"* ]]; then
               folder=$(dirname "$name")
               echo "<li><span class='folder'>📁 ${folder}/</span><br><a href=\"${rel}\">${name}</a></li>" >> html_output/index.html
@@ -164,15 +121,9 @@ jobs:
           done
 
           cat >> html_output/index.html << 'EOF'
-              </ul>
-              <div class="date">Автоматическая сборка: $(date '+%Y-%m-%d %H:%M:%S')</div>
-          </body>
-          </html>
+          </ul><div class="date">Автоматическая сборка: $(date '+%Y-%m-%d %H:%M:%S')</div></body></html>
           EOF
-          
-          echo "✅ Индекс создан"
 
-      # =============== СОХРАНЕНИЕ АРТЕФАКТОВ ===============
       - name: 📦 Upload artifacts
         uses: actions/upload-artifact@v4.4.3
         with:
@@ -181,30 +132,14 @@ jobs:
             html_output/
           retention-days: 7
 
-      # =============== ПОДГОТОВКА К ДЕПЛОЮ ===============
-      - name: 📁 Prepare for deployment
-        run: |
-          mkdir -p deploy_temp
-          if [ "${{ github.ref_name }}" == "main" ]; then
-            PREFIX=""
-          else
-            BRANCH_NAME="${{ github.ref_name }}"
-            SAFE_NAME=$(echo "$BRANCH_NAME" | sed 's/Ветка_/branch_/g' | sed 's/Тест/test/g' | tr '[:upper:]' '[:lower:]')
-            PREFIX="${SAFE_NAME}/"
-          fi
-          mkdir -p "deploy_temp/$PREFIX"
-          if [ -d "html_output" ]; then
-            cp -r html_output/* "deploy_temp/$PREFIX" 2>/dev/null || true
-          fi
-
-      # =============== ДЕПЛОЙ ===============
-      - name: 🚀 Deploy to gh-pages branch
+      # =============== НОВЫЙ ШАГ: ДЕПЛОЙ НА GH-PAGES ===============
+      - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./deploy_temp
+          publish_dir: ./html_output
           publish_branch: gh-pages
-          keep_files: true
+          keep_files: false
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: '📝 Деплой ветки ${{ github.ref_name }} (из папки Site)'
+          commit_message: '📝 Деплой из папки Site'
