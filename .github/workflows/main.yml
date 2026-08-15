@@ -45,28 +45,55 @@ jobs:
             exit 1
           fi
           echo "✅ Папка Site найдена"
+          echo "📋 Содержимое Site:"
+          find ./Site -type f -name "*.md" | head -20
 
-      # =============== АНАЛИЗ СТРУКТУРЫ С ПАПКАМИ ===============
-      - name: 📊 Analyze site structure with folders
+      # =============== АНАЛИЗ СТРУКТУРЫ ===============
+      - name: 📊 Generate site structure
         run: |
-          echo "📊 Анализирую структуру с папками..."
+          echo "📊 Генерирую структуру сайта..."
           cd Site
-          echo '{ "generated": "'$(date)'", "items": [' > site-structure.json
+          
+          # Создаём JSON вручную, чтобы точно заполнить
+          echo '{ "generated": "'$(date '+%Y-%m-%d %H:%M:%S')'", "items": [' > site-structure.json
+          
+          # Находим все .md файлы и добавляем их в JSON
           first=true
-          find . -name "*.md" -not -path "./node_modules/*" | while read file; do
+          find . -type f -name "*.md" -not -path "./node_modules/*" | while read file; do
             if [ "$first" = true ]; then
               first=false
             else
               echo ',' >> site-structure.json
             fi
+            
+            # Получаем имя файла и путь
             filename=$(basename "$file")
             path=$(dirname "$file" | sed 's|^\./||')
-            title=$(grep -m 1 '^# ' "$file" | sed 's/^# //' || echo "${filename%.md}")
             
-            echo '  { "file": "'$filename'", "path": "'$path'", "title": "'$title'" }' >> site-structure.json
+            # Извлекаем заголовок из файла
+            title=$(grep -m 1 '^# ' "$file" | sed 's/^# //' || echo "")
+            if [ -z "$title" ]; then
+              title="${filename%.md}"
+            fi
+            
+            # Экранируем кавычки в заголовке
+            title=$(echo "$title" | sed 's/"/\\"/g')
+            
+            echo '    { "file": "'$filename'", "path": "'$path'", "title": "'$title'" }' >> site-structure.json
+            
+            echo "  Найден: $filename в $path"
           done
+          
           echo '] }' >> site-structure.json
-          echo "✅ Анализ завершён"
+          
+          # Проверяем, что JSON создался
+          if [ -f site-structure.json ]; then
+            echo "✅ JSON создан:"
+            cat site-structure.json | head -20
+          else
+            echo "❌ Ошибка: JSON не создан!"
+            exit 1
+          fi
 
       # =============== КОНВЕРТАЦИЯ .md → .html ===============
       - name: 🌐 Convert MD to HTML
@@ -84,6 +111,12 @@ jobs:
               match = re.search(r'^# (.+)$', content, re.MULTILINE)
               return match.group(1).strip() if match else None
           
+          # Проверяем, что папка Site существует
+          if not os.path.exists(input_dir):
+              print(f"❌ Папка {input_dir} не найдена!")
+              exit(1)
+          
+          # Обходим все .md файлы
           for root, dirs, files in os.walk(input_dir):
               for file in files:
                   if file.endswith(".md"):
@@ -119,9 +152,15 @@ jobs:
       # =============== КОПИРОВАНИЕ JSON ===============
       - name: 📋 Copy structure data
         run: |
-          cp Site/site-structure.json html_output/ 2>/dev/null || echo "ℹ️ JSON не найден"
+          if [ -f "Site/site-structure.json" ]; then
+            cp Site/site-structure.json html_output/
+            echo "✅ JSON скопирован"
+          else
+            echo "❌ JSON не найден!"
+            exit 1
+          fi
 
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML С РАБОЧИМ ДЕРЕВОМ ===============
+      # =============== ГЕНЕРАЦИЯ INDEX.HTML ===============
       - name: 📋 Generate index with working tree
         run: |
           echo "📋 Генерирую главную страницу с деревом папок..."
@@ -172,16 +211,25 @@ jobs:
           async function loadStructure() {
             try {
               const response = await fetch('site-structure.json');
+              if (!response.ok) throw new Error('JSON не загружен');
               const data = await response.json();
-              renderTree(data.items);
+              console.log('Загружено элементов:', data.items ? data.items.length : 0);
+              renderTree(data.items || []);
             } catch (error) {
+              console.error('Ошибка загрузки:', error);
               document.getElementById('tree-container').innerHTML = 
-                `<p class="empty">⚠️ Не удалось загрузить структуру</p>`;
+                `<p class="empty">⚠️ Не удалось загрузить структуру: ${error.message}</p>`;
             }
           }
           
           function renderTree(items) {
             const container = document.getElementById('tree-container');
+            
+            if (!items || items.length === 0) {
+              container.innerHTML = '<p class="empty">📭 Нет файлов в папке Site</p>';
+              return;
+            }
+            
             // Группируем по папкам
             const tree = {};
             items.forEach(item => {
@@ -191,30 +239,29 @@ jobs:
             });
             
             let html = '';
-            // Сортируем папки
             const folders = Object.keys(tree).sort();
             let hasRootFiles = false;
             
             folders.forEach(folder => {
               const files = tree[folder];
               if (folder === '.' || folder === '') {
-                // Файлы в корне
                 hasRootFiles = true;
                 html += `<div class="root-files">`;
                 files.forEach(file => {
-                  html += `<a href="${file.file.replace('.md', '.html')}" class="file-item">📄 <span class="title">${file.title}</span></a>`;
+                  const href = file.file.replace('.md', '.html');
+                  html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div>`;
               } else {
-                // Папка
-                const folderName = folder.split('/').pop();
+                const folderName = folder.split('/').pop() || folder;
                 html += `<div class="folder">`;
                 html += `<div class="folder-label" onclick="toggleFolder(this)">`;
                 html += `<span class="arrow">▶</span> 📁 ${folderName}`;
                 html += `</div>`;
                 html += `<div class="folder-content">`;
                 files.forEach(file => {
-                  html += `<a href="${file.file.replace('.md', '.html')}" class="file-item">📄 <span class="title">${file.title}</span></a>`;
+                  const href = file.file.replace('.md', '.html');
+                  html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div></div>`;
               }
