@@ -1,357 +1,157 @@
-name: 📝 Markdown Pipeline
-
-on:
-  push:
-    branches:
-      - main
-      - develop
-      - 'Ветка_Тест1'
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
-jobs:
-  build:
-    name: 🔍 Конвертация .md в .html
-    runs-on: ubuntu-latest
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4.2.2
-        with:
-          fetch-depth: 0
-
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: 📦 Install Python markdown library
-        run: pip install markdown
-
-      # =============== ДИАГНОСТИКА: ПРОВЕРКА ПАПКИ SITE ===============
-      - name: 🔍 Check Site folder
-        run: |
-          echo "🔍 Проверяю папку Site..."
-          if [ ! -d "./Site" ]; then
-            echo "❌ Папка Site не найдена!"
-            exit 1
-          fi
-          echo "✅ Папка Site найдена"
-          echo "📋 Содержимое Site (первые 20 файлов):"
-          find ./Site -type f | head -20
-          echo "---"
-          echo "📊 Всего файлов в Site:"
-          find ./Site -type f | wc -l
-
-      # =============== ДИАГНОСТИКА: СПИСОК ВСЕХ .MD ФАЙЛОВ ===============
-      - name: 📋 List all MD files
-        run: |
-          echo "📋 Все .md файлы в Site:"
-          find ./Site -type f -name "*.md" -not -path "./node_modules/*" | sort
-          echo "---"
-          echo "📊 Количество .md файлов:"
-          find ./Site -type f -name "*.md" -not -path "./node_modules/*" | wc -l
-          echo "---"
-          echo "📄 Пример содержимого первого .md файла:"
-          FIRST_MD=$(find ./Site -type f -name "*.md" -not -path "./node_modules/*" | head -1)
-          if [ -n "$FIRST_MD" ]; then
-            echo "Файл: $FIRST_MD"
-            head -5 "$FIRST_MD" || echo "Не удалось прочитать файл"
-          else
-            echo "⚠️ .md файлы не найдены!"
-          fi
-
-      # =============== АНАЛИЗ СТРУКТУРЫ С .html В JSON ===============
-      - name: 📊 Generate site structure
-        run: |
-          echo "📊 Генерирую структуру сайта с .html..."
-          cd Site
+# =============== ИСПРАВЛЕННАЯ ГЕНЕРАЦИЯ INDEX.HTML ===============
+- name: 📋 Generate index with working tree
+  run: |
+    echo "📋 Генерирую главную страницу с деревом папок..."
+    
+    cat > html_output/index.html << 'EOF'
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>📚 Документация</title>
+    <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f0f1a; color: #e0e0e0; }
+    .header { text-align: center; padding: 3rem 1rem; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-bottom: 1px solid #2a2a3e; }
+    .header h1 { font-size: 3rem; color: #fff; }
+    .header p { color: #aaa; max-width: 600px; margin: 1rem auto; }
+    .search-box { max-width: 600px; margin: 2rem auto; padding: 0 2rem; }
+    #search-input { width: 100%; padding: 1rem 1.5rem; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 50px; color: #fff; font-size: 1rem; }
+    #search-input:focus { outline: none; border-color: #4a90e2; }
+    .tree { max-width: 800px; margin: 0 auto; padding: 2rem; }
+    .folder { margin: 0.5rem 0; }
+    .folder-label { cursor: pointer; padding: 0.5rem 1rem; background: #1a1a2e; border-radius: 8px; border-left: 3px solid #4a90e2; display: flex; align-items: center; gap: 0.5rem; user-select: none; }
+    .folder-label:hover { background: #2a2a3e; }
+    .folder-label .arrow { transition: transform 0.2s; display: inline-block; }
+    .folder-label .arrow.open { transform: rotate(90deg); }
+    .folder-content { margin-left: 1.5rem; padding-left: 1rem; border-left: 1px solid #2a2a3e; display: none; }
+    .folder-content.open { display: block; }
+    .file-item { display: block; padding: 0.3rem 1rem; margin: 0.2rem 0; color: #aaa; text-decoration: none; border-radius: 4px; }
+    .file-item:hover { background: #1a1a2e; color: #fff; }
+    .file-item .title { color: #e0e0e0; }
+    .root-files { margin-left: 0.5rem; }
+    .empty { text-align: center; padding: 2rem; color: #888; }
+    .footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #2a2a3e; margin-top: 2rem; }
+    </style>
+    </head>
+    <body>
+    <div class="header">
+      <h1>📚 Документация</h1>
+      <p>Страницы из папки <code>Site</code></p>
+    </div>
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="🔍 Поиск по страницам...">
+    </div>
+    <div class="tree" id="tree-container">
+      <p class="empty">Загрузка структуры...</p>
+    </div>
+    <div class="footer">Автоматическая сборка</div>
+    
+    <script>
+    async function loadStructure() {
+      try {
+        const response = await fetch('site-structure.json');
+        if (!response.ok) throw new Error('JSON не загружен');
+        const data = await response.json();
+        console.log('Загружено элементов:', data.items ? data.items.length : 0);
+        renderTree(data.items || []);
+      } catch (error) {
+        console.error('Ошибка загрузки:', error);
+        document.getElementById('tree-container').innerHTML = 
+          `<p class="empty">⚠️ Не удалось загрузить структуру: ${error.message}</p>`;
+      }
+    }
+    
+    function renderTree(items) {
+      const container = document.getElementById('tree-container');
+      
+      if (!items || items.length === 0) {
+        container.innerHTML = '<p class="empty">📭 Нет файлов в папке Site</p>';
+        return;
+      }
+      
+      const tree = {};
+      items.forEach(item => {
+        const path = item.path || '';
+        if (!tree[path]) tree[path] = [];
+        tree[path].push(item);
+      });
+      
+      let html = '';
+      const folders = Object.keys(tree).sort();
+      let hasRootFiles = false;
+      
+      folders.forEach(folder => {
+        const files = tree[folder];
+        if (folder === '.' || folder === '') {
+          hasRootFiles = true;
+          html += `<div class="root-files">`;
+          files.forEach(file => {
+            // ИСПРАВЛЕНИЕ: явно указываем путь
+            const href = file.path && file.path !== '.' 
+              ? `${file.path}/${file.file}` 
+              : file.file;
+            html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
+          });
+          html += `</div>`;
+        } else {
+          const folderName = folder.split('/').pop() || folder;
+          html += `<div class="folder">`;
+          html += `<div class="folder-label" onclick="toggleFolder(this)">`;
+          html += `<span class="arrow">▶</span> 📁 ${folderName}`;
+          html += `</div>`;
+          html += `<div class="folder-content">`;
+          files.forEach(file => {
+            // ИСПРАВЛЕНИЕ: явно указываем путь
+            const href = file.path && file.path !== '.' 
+              ? `${file.path}/${file.file}` 
+              : file.file;
+            html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
+          });
+          html += `</div></div>`;
+        }
+      });
+      
+      if (!hasRootFiles && Object.keys(tree).length === 0) {
+        html = '<p class="empty">Нет страниц</p>';
+      }
+      
+      container.innerHTML = html;
+      
+      document.getElementById('search-input').addEventListener('input', function(e) {
+        const term = e.target.value.toLowerCase();
+        document.querySelectorAll('.file-item').forEach(item => {
+          const title = item.querySelector('.title').textContent.toLowerCase();
+          const parentFolder = item.closest('.folder-content');
+          const parentLabel = parentFolder ? parentFolder.previousElementSibling : null;
           
-          echo '{ "generated": "'$(date '+%Y-%m-%d %H:%M:%S')'", "items": [' > site-structure.json
-          
-          first=true
-          find . -type f -name "*.md" -not -path "./node_modules/*" | while read file; do
-            if [ "$first" = true ]; then
-              first=false
-            else
-              echo ',' >> site-structure.json
-            fi
-            
-            filename=$(basename "$file")
-            html_filename="${filename%.md}.html"
-            path=$(dirname "$file" | sed 's|^\./||')
-            
-            title=$(grep -m 1 '^# ' "$file" | sed 's/^# //' || echo "")
-            if [ -z "$title" ]; then
-              title="${filename%.md}"
-            fi
-            title=$(echo "$title" | sed 's/"/\\"/g')
-            
-            echo '    { "file": "'$html_filename'", "path": "'$path'", "title": "'$title'" }' >> site-structure.json
-            echo "  Найден: $filename → $html_filename в $path"
-          done
-          
-          echo '] }' >> site-structure.json
-          
-          echo "✅ JSON создан"
-          echo "📄 Содержимое JSON (первые 20 строк):"
-          cat site-structure.json | head -20
-
-      # =============== КОНВЕРТАЦИЯ .md → .html ===============
-      - name: 🌐 Convert MD to HTML
-        run: |
-          echo "🌐 Конвертирую .md в .html..."
-          mkdir -p html_output
-          
-          cat > convert.py << 'EOF'
-          import os, re, markdown
-          
-          input_dir = "Site"
-          output_dir = "html_output"
-          
-          def extract_title(content):
-              match = re.search(r'^# (.+)$', content, re.MULTILINE)
-              return match.group(1).strip() if match else None
-          
-          if not os.path.exists(input_dir):
-              print(f"❌ Папка {input_dir} не найдена!")
-              exit(1)
-          
-          converted = 0
-          for root, dirs, files in os.walk(input_dir):
-              for file in files:
-                  if file.endswith(".md"):
-                      md_path = os.path.join(root, file)
-                      rel_path = os.path.relpath(md_path, input_dir)
-                      html_path = rel_path[:-3] + ".html"
-                      target = os.path.join(output_dir, html_path)
-                      os.makedirs(os.path.dirname(target), exist_ok=True)
-                      
-                      with open(md_path, 'r', encoding='utf-8') as f:
-                          content = f.read()
-                      
-                      title = extract_title(content) or os.path.basename(file)[:-3]
-                      html_content = markdown.markdown(content, extensions=['extra', 'toc'])
-                      
-                      full_html = f"""<!DOCTYPE html>
-                      <html>
-                      <head><meta charset="UTF-8"><title>{title}</title>
-                      <style>body{{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
-                      h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
-                      pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
-                      </style></head>
-                      <body>{html_content}<hr><p><small>Сгенерировано из: {rel_path}</small></p></body>
-                      </html>"""
-                      with open(target, 'w', encoding='utf-8') as f:
-                          f.write(full_html)
-                      print(f"✅ {rel_path} → {html_path}")
-                      converted += 1
-          
-          print(f"📊 Всего сконвертировано файлов: {converted}")
-          EOF
-          
-          python convert.py
-          echo "✅ Конвертация завершена"
-
-      # =============== ДИАГНОСТИКА: ПРОВЕРКА HTML_OUTPUT ===============
-      - name: 📋 Check html_output
-        run: |
-          echo "📋 Содержимое html_output:"
-          find ./html_output -type f | sort
-          echo "---"
-          echo "📊 Количество файлов в html_output:"
-          find ./html_output -type f | wc -l
-          echo "---"
-          echo "📄 Пример структуры папок:"
-          find ./html_output -type d | head -10
-
-      # =============== КОПИРОВАНИЕ JSON ===============
-      - name: 📋 Copy structure data
-        run: |
-          if [ -f "Site/site-structure.json" ]; then
-            cp Site/site-structure.json html_output/
-            echo "✅ JSON скопирован"
-          else
-            echo "❌ JSON не найден!"
-            exit 1
-          fi
-
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML ===============
-      - name: 📋 Generate index with working tree
-        run: |
-          echo "📋 Генерирую главную страницу с деревом папок..."
-          
-          cat > html_output/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head><meta charset="UTF-8"><title>📚 Документация</title>
-          <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: system-ui, sans-serif; background: #0f0f1a; color: #e0e0e0; }
-          .header { text-align: center; padding: 3rem 1rem; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-bottom: 1px solid #2a2a3e; }
-          .header h1 { font-size: 3rem; color: #fff; }
-          .header p { color: #aaa; max-width: 600px; margin: 1rem auto; }
-          .search-box { max-width: 600px; margin: 2rem auto; padding: 0 2rem; }
-          #search-input { width: 100%; padding: 1rem 1.5rem; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 50px; color: #fff; font-size: 1rem; }
-          #search-input:focus { outline: none; border-color: #4a90e2; }
-          .tree { max-width: 800px; margin: 0 auto; padding: 2rem; }
-          .folder { margin: 0.5rem 0; }
-          .folder-label { cursor: pointer; padding: 0.5rem 1rem; background: #1a1a2e; border-radius: 8px; border-left: 3px solid #4a90e2; display: flex; align-items: center; gap: 0.5rem; user-select: none; }
-          .folder-label:hover { background: #2a2a3e; }
-          .folder-label .arrow { transition: transform 0.2s; display: inline-block; }
-          .folder-label .arrow.open { transform: rotate(90deg); }
-          .folder-content { margin-left: 1.5rem; padding-left: 1rem; border-left: 1px solid #2a2a3e; display: none; }
-          .folder-content.open { display: block; }
-          .file-item { display: block; padding: 0.3rem 1rem; margin: 0.2rem 0; color: #aaa; text-decoration: none; border-radius: 4px; }
-          .file-item:hover { background: #1a1a2e; color: #fff; }
-          .file-item .title { color: #e0e0e0; }
-          .root-files { margin-left: 0.5rem; }
-          .empty { text-align: center; padding: 2rem; color: #888; }
-          .footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #2a2a3e; margin-top: 2rem; }
-          </style>
-          </head>
-          <body>
-          <div class="header">
-            <h1>📚 Документация</h1>
-            <p>Страницы из папки <code>Site</code></p>
-          </div>
-          <div class="search-box">
-            <input type="text" id="search-input" placeholder="🔍 Поиск по страницам...">
-          </div>
-          <div class="tree" id="tree-container">
-            <p class="empty">Загрузка структуры...</p>
-          </div>
-          <div class="footer">Автоматическая сборка</div>
-          
-          <script>
-          async function loadStructure() {
-            try {
-              const response = await fetch('site-structure.json');
-              if (!response.ok) throw new Error('JSON не загружен');
-              const data = await response.json();
-              console.log('Загружено элементов:', data.items ? data.items.length : 0);
-              renderTree(data.items || []);
-            } catch (error) {
-              console.error('Ошибка загрузки:', error);
-              document.getElementById('tree-container').innerHTML = 
-                `<p class="empty">⚠️ Не удалось загрузить структуру: ${error.message}</p>`;
-            }
-          }
-          
-          function renderTree(items) {
-            const container = document.getElementById('tree-container');
-            
-            if (!items || items.length === 0) {
-              container.innerHTML = '<p class="empty">📭 Нет файлов в папке Site</p>';
-              return;
-            }
-            
-            const tree = {};
-            items.forEach(item => {
-              const path = item.path || '';
-              if (!tree[path]) tree[path] = [];
-              tree[path].push(item);
-            });
-            
-            let html = '';
-            const folders = Object.keys(tree).sort();
-            let hasRootFiles = false;
-            
-            folders.forEach(folder => {
-              const files = tree[folder];
-              if (folder === '.' || folder === '') {
-                hasRootFiles = true;
-                html += `<div class="root-files">`;
-                files.forEach(file => {
-                  const href = file.file;
-                  html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
-                });
-                html += `</div>`;
-              } else {
-                const folderName = folder.split('/').pop() || folder;
-                html += `<div class="folder">`;
-                html += `<div class="folder-label" onclick="toggleFolder(this)">`;
-                html += `<span class="arrow">▶</span> 📁 ${folderName}`;
-                html += `</div>`;
-                html += `<div class="folder-content">`;
-                files.forEach(file => {
-                  const href = file.file;
-                  html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
-                });
-                html += `</div></div>`;
+          if (title.includes(term)) {
+            item.style.display = 'block';
+            if (parentFolder) {
+              parentFolder.classList.add('open');
+              if (parentLabel) {
+                const arrow = parentLabel.querySelector('.arrow');
+                if (arrow) arrow.classList.add('open');
               }
-            });
-            
-            if (!hasRootFiles && Object.keys(tree).length === 0) {
-              html = '<p class="empty">Нет страниц</p>';
             }
-            
-            container.innerHTML = html;
-            
-            document.getElementById('search-input').addEventListener('input', function(e) {
-              const term = e.target.value.toLowerCase();
-              document.querySelectorAll('.file-item').forEach(item => {
-                const title = item.querySelector('.title').textContent.toLowerCase();
-                const parentFolder = item.closest('.folder-content');
-                const parentLabel = parentFolder ? parentFolder.previousElementSibling : null;
-                
-                if (title.includes(term)) {
-                  item.style.display = 'block';
-                  if (parentFolder) {
-                    parentFolder.classList.add('open');
-                    if (parentLabel) {
-                      const arrow = parentLabel.querySelector('.arrow');
-                      if (arrow) arrow.classList.add('open');
-                    }
-                  }
-                } else {
-                  item.style.display = 'none';
-                }
-              });
-            });
+          } else {
+            item.style.display = 'none';
           }
-          
-          function toggleFolder(label) {
-            const content = label.nextElementSibling;
-            const arrow = label.querySelector('.arrow');
-            if (content) {
-              content.classList.toggle('open');
-              if (arrow) arrow.classList.toggle('open');
-            }
-          }
-          
-          document.addEventListener('DOMContentLoaded', loadStructure);
-          </script>
-          </body>
-          </html>
-          EOF
-          
-          echo "✅ Главная страница с деревом создана"
-
-      # =============== ЗАГРУЗКА АРТЕФАКТА ===============
-      - name: 📦 Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: html_output/
-
-  deploy:
-    name: 🚀 Deploy to GitHub Pages
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: 🚀 Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+        });
+      });
+    }
+    
+    function toggleFolder(label) {
+      const content = label.nextElementSibling;
+      const arrow = label.querySelector('.arrow');
+      if (content) {
+        content.classList.toggle('open');
+        if (arrow) arrow.classList.toggle('open');
+      }
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadStructure);
+    </script>
+    </body>
+    </html>
+    EOF
+    
+    echo "✅ Главная страница с деревом создана"
