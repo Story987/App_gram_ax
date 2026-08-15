@@ -186,7 +186,7 @@ jobs:
             exit 1
           fi
 
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML ===============
+      # =============== ГЕНЕРАЦИЯ INDEX.HTML С ИСПРАВЛЕННЫМИ ПУТЯМИ ===============
       - name: 📋 Generate index with working tree
         run: |
           echo "📋 Генерирую главную страницу с деревом папок..."
@@ -285,7 +285,7 @@ jobs:
                 html += `</div>`;
                 html += `<div class="folder-content">`;
                 files.forEach(file => {
-                  const href = file.file;
+                  const href = `${folder}/${file.file}`;
                   html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div></div>`;
