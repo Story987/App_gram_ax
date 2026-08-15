@@ -121,8 +121,8 @@ jobs:
         run: |
           cp Site/site-structure.json html_output/ 2>/dev/null || echo "ℹ️ JSON не найден"
 
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML С ДЕРЕВОМ ПАПОК ===============
-      - name: 📋 Generate index with folder tree
+      # =============== ГЕНЕРАЦИЯ INDEX.HTML С РАБОЧИМ ДЕРЕВОМ ===============
+      - name: 📋 Generate index with working tree
         run: |
           echo "📋 Генерирую главную страницу с деревом папок..."
           
@@ -141,7 +141,7 @@ jobs:
           #search-input:focus { outline: none; border-color: #4a90e2; }
           .tree { max-width: 800px; margin: 0 auto; padding: 2rem; }
           .folder { margin: 0.5rem 0; }
-          .folder-label { cursor: pointer; padding: 0.5rem 1rem; background: #1a1a2e; border-radius: 8px; border-left: 3px solid #4a90e2; display: flex; align-items: center; gap: 0.5rem; }
+          .folder-label { cursor: pointer; padding: 0.5rem 1rem; background: #1a1a2e; border-radius: 8px; border-left: 3px solid #4a90e2; display: flex; align-items: center; gap: 0.5rem; user-select: none; }
           .folder-label:hover { background: #2a2a3e; }
           .folder-label .arrow { transition: transform 0.2s; display: inline-block; }
           .folder-label .arrow.open { transform: rotate(90deg); }
@@ -150,6 +150,7 @@ jobs:
           .file-item { display: block; padding: 0.3rem 1rem; margin: 0.2rem 0; color: #aaa; text-decoration: none; border-radius: 4px; }
           .file-item:hover { background: #1a1a2e; color: #fff; }
           .file-item .title { color: #e0e0e0; }
+          .root-files { margin-left: 0.5rem; }
           .empty { text-align: center; padding: 2rem; color: #888; }
           .footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #2a2a3e; margin-top: 2rem; }
           </style>
@@ -192,13 +193,18 @@ jobs:
             let html = '';
             // Сортируем папки
             const folders = Object.keys(tree).sort();
+            let hasRootFiles = false;
+            
             folders.forEach(folder => {
               const files = tree[folder];
-              if (folder === '.') {
+              if (folder === '.' || folder === '') {
                 // Файлы в корне
+                hasRootFiles = true;
+                html += `<div class="root-files">`;
                 files.forEach(file => {
                   html += `<a href="${file.file.replace('.md', '.html')}" class="file-item">📄 <span class="title">${file.title}</span></a>`;
                 });
+                html += `</div>`;
               } else {
                 // Папка
                 const folderName = folder.split('/').pop();
@@ -214,14 +220,32 @@ jobs:
               }
             });
             
-            container.innerHTML = html || '<p class="empty">Нет страниц</p>';
+            if (!hasRootFiles && Object.keys(tree).length === 0) {
+              html = '<p class="empty">Нет страниц</p>';
+            }
+            
+            container.innerHTML = html;
             
             // Поиск
             document.getElementById('search-input').addEventListener('input', function(e) {
               const term = e.target.value.toLowerCase();
               document.querySelectorAll('.file-item').forEach(item => {
                 const title = item.querySelector('.title').textContent.toLowerCase();
-                item.style.display = title.includes(term) ? 'block' : 'none';
+                const parentFolder = item.closest('.folder-content');
+                const parentLabel = parentFolder ? parentFolder.previousElementSibling : null;
+                
+                if (title.includes(term)) {
+                  item.style.display = 'block';
+                  if (parentFolder) {
+                    parentFolder.classList.add('open');
+                    if (parentLabel) {
+                      const arrow = parentLabel.querySelector('.arrow');
+                      if (arrow) arrow.classList.add('open');
+                    }
+                  }
+                } else {
+                  item.style.display = 'none';
+                }
               });
             });
           }
@@ -229,8 +253,10 @@ jobs:
           function toggleFolder(label) {
             const content = label.nextElementSibling;
             const arrow = label.querySelector('.arrow');
-            content.classList.toggle('open');
-            arrow.classList.toggle('open');
+            if (content) {
+              content.classList.toggle('open');
+              if (arrow) arrow.classList.toggle('open');
+            }
           }
           
           document.addEventListener('DOMContentLoaded', loadStructure);
