@@ -107,15 +107,14 @@ jobs:
           echo "📄 Содержимое JSON (первые 20 строк):"
           cat site-structure.json | head -20
 
-      # =============== КОНВЕРТАЦИЯ .md → .html С УМНЫМИ КРОШКАМИ ===============
-      - name: 🌐 Convert MD to HTML with smart breadcrumbs
+      # =============== КОНВЕРТАЦИЯ .md → .html С ХЛЕБНЫМИ КРОШКАМИ ===============
+      - name: 🌐 Convert MD to HTML with breadcrumbs
         run: |
-          echo "🌐 Конвертирую .md в .html с умными хлебными крошками..."
+          echo "🌐 Конвертирую .md в .html с хлебными крошками..."
           mkdir -p html_output
           
           cat > convert.py << 'EOF'
-          import os, re, markdown, json
-          from pathlib import Path
+          import os, re, markdown
           
           input_dir = "Site"
           output_dir = "html_output"
@@ -125,7 +124,7 @@ jobs:
               return match.group(1).strip() if match else None
           
           def generate_breadcrumbs(path, title):
-              """Генерирует хлебные крошки с ссылками на _index.html"""
+              """Генерирует HTML для хлебных крошек"""
               if not path or path == '.':
                   return f'<a href="/">Главная</a> › <span>{title}</span>'
               
@@ -134,28 +133,9 @@ jobs:
               current_path = ''
               for part in parts:
                   current_path += part + '/'
-                  # === УМНЫЕ КРОШКИ: ссылка на _index.html ===
-                  breadcrumb_html += f' › <a href="/{current_path}_index.html">{part}</a>'
+                  breadcrumb_html += f' › <a href="/{current_path}">{part}</a>'
               breadcrumb_html += f' › <span>{title}</span>'
               return breadcrumb_html
-          
-          def get_folder_contents(folder_path):
-              """Возвращает список файлов и папок в указанной папке"""
-              items = []
-              if not os.path.exists(folder_path):
-                  return items
-              
-              for item in os.listdir(folder_path):
-                  item_path = os.path.join(folder_path, item)
-                  if os.path.isdir(item_path):
-                      # Проверяем, есть ли в папке _index.md
-                      if os.path.exists(os.path.join(item_path, '_index.md')):
-                          items.append({'name': item, 'type': 'folder', 'path': f'{item}/_index.html'})
-                      else:
-                          items.append({'name': item, 'type': 'folder', 'path': f'{item}/'})
-                  elif item.endswith('.md') and not item.startswith('_index'):
-                      items.append({'name': item[:-3], 'type': 'file', 'path': item[:-3] + '.html'})
-              return items
           
           if not os.path.exists(input_dir):
               print(f"❌ Папка {input_dir} не найдена!")
@@ -177,23 +157,10 @@ jobs:
                       title = extract_title(content) or os.path.basename(file)[:-3]
                       html_content = markdown.markdown(content, extensions=['extra', 'toc'])
                       
+                      # Получаем путь для хлебных крошек
                       path = os.path.dirname(rel_path)
                       if path == '.':
                           path = ''
-                      
-                      # Если это _index.md — добавляем список содержимого папки
-                      if file == '_index.md':
-                          folder_path = os.path.dirname(md_path)
-                          folder_contents = get_folder_contents(folder_path)
-                          
-                          if folder_contents:
-                              html_content += '<hr><h2>📂 Содержимое папки</h2><ul>'
-                              for item in folder_contents:
-                                  if item['type'] == 'folder':
-                                      html_content += f'<li>📁 <a href="/{item["path"]}">{item["name"]}</a></li>'
-                                  else:
-                                      html_content += f'<li>📄 <a href="/{path}/{item["path"]}">{item["name"]}</a></li>'
-                              html_content += '</ul>'
                       
                       breadcrumbs = generate_breadcrumbs(path, title)
                       
@@ -208,8 +175,6 @@ jobs:
                           .breadcrumbs a{{color:#4a90e2;text-decoration:none}}
                           .breadcrumbs a:hover{{text-decoration:underline}}
                           .breadcrumbs span{{color:#aaa}}
-                          ul{{list-style:none;padding-left:0}}
-                          li{{padding:5px 0}}
                       </style>
                       </head>
                       <body>
@@ -220,7 +185,7 @@ jobs:
                       </html>"""
                       with open(target, 'w', encoding='utf-8') as f:
                           f.write(full_html)
-                      print(f"✅ {rel_path} → {html_path}")
+                      print(f"✅ {rel_path} → {html_path} (крошки: {breadcrumbs})")
                       converted += 1
           
           print(f"📊 Всего сконвертировано файлов: {converted}")
@@ -252,10 +217,10 @@ jobs:
             exit 1
           fi
 
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML ===============
-      - name: 📋 Generate index with tree
+      # =============== ГЕНЕРАЦИЯ INDEX.HTML С ДЕРЕВОМ И ХЛЕБНЫМИ КРОШКАМИ ===============
+      - name: 📋 Generate index with tree and breadcrumbs
         run: |
-          echo "📋 Генерирую главную страницу с деревом папок..."
+          echo "📋 Генерирую главную страницу с деревом папок и хлебными крошками..."
           
           cat > html_output/index.html << 'EOF'
           <!DOCTYPE html>
@@ -284,6 +249,9 @@ jobs:
           .root-files { margin-left: 0.5rem; }
           .empty { text-align: center; padding: 2rem; color: #888; }
           .footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #2a2a3e; margin-top: 2rem; }
+          .breadcrumb-path { font-size: 0.9rem; color: #888; margin-bottom: 1rem; padding: 0.5rem 1rem; background: #1a1a2e; border-radius: 8px; display: none; }
+          .breadcrumb-path a { color: #4a90e2; text-decoration: none; }
+          .breadcrumb-path a:hover { text-decoration: underline; }
           </style>
           </head>
           <body>
@@ -339,7 +307,7 @@ jobs:
                 hasRootFiles = true;
                 html += `<div class="root-files">`;
                 files.forEach(file => {
-                  const href = `/${file.file}`;
+                  const href = file.file;
                   html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div>`;
@@ -351,7 +319,7 @@ jobs:
                 html += `</div>`;
                 html += `<div class="folder-content">`;
                 files.forEach(file => {
-                  const href = `/${folder}/${file.file}`;
+                  const href = `${folder}/${file.file}`;
                   html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div></div>`;
@@ -402,7 +370,7 @@ jobs:
           </html>
           EOF
           
-          echo "✅ Главная страница создана"
+          echo "✅ Главная страница с деревом и хлебными крошками создана"
 
       # =============== ЗАГРУЗКА АРТЕФАКТА ===============
       - name: 📦 Upload GitHub Pages artifact
