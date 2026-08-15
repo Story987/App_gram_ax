@@ -107,14 +107,15 @@ jobs:
           echo "📄 Содержимое JSON (первые 20 строк):"
           cat site-structure.json | head -20
 
-      # =============== КОНВЕРТАЦИЯ .md → .html С ХЛЕБНЫМИ КРОШКАМИ ===============
-      - name: 🌐 Convert MD to HTML with breadcrumbs
+      # =============== КОНВЕРТАЦИЯ .md → .html С УМНЫМИ КРОШКАМИ ===============
+      - name: 🌐 Convert MD to HTML with smart breadcrumbs
         run: |
-          echo "🌐 Конвертирую .md в .html с хлебными крошками..."
+          echo "🌐 Конвертирую .md в .html с умными хлебными крошками..."
           mkdir -p html_output
           
           cat > convert.py << 'EOF'
-          import os, re, markdown
+          import os, re, markdown, json
+          from pathlib import Path
           
           input_dir = "Site"
           output_dir = "html_output"
@@ -124,7 +125,7 @@ jobs:
               return match.group(1).strip() if match else None
           
           def generate_breadcrumbs(path, title):
-              """Генерирует HTML для хлебных крошек"""
+              """Генерирует хлебные крошки с ссылками на _index.html"""
               if not path or path == '.':
                   return f'<a href="/">Главная</a> › <span>{title}</span>'
               
@@ -133,9 +134,28 @@ jobs:
               current_path = ''
               for part in parts:
                   current_path += part + '/'
-                  breadcrumb_html += f' › <a href="/{current_path}">{part}</a>'
+                  # === УМНЫЕ КРОШКИ: ссылка на _index.html ===
+                  breadcrumb_html += f' › <a href="/{current_path}_index.html">{part}</a>'
               breadcrumb_html += f' › <span>{title}</span>'
               return breadcrumb_html
+          
+          def get_folder_contents(folder_path):
+              """Возвращает список файлов и папок в указанной папке"""
+              items = []
+              if not os.path.exists(folder_path):
+                  return items
+              
+              for item in os.listdir(folder_path):
+                  item_path = os.path.join(folder_path, item)
+                  if os.path.isdir(item_path):
+                      # Проверяем, есть ли в папке _index.md
+                      if os.path.exists(os.path.join(item_path, '_index.md')):
+                          items.append({'name': item, 'type': 'folder', 'path': f'{item}/_index.html'})
+                      else:
+                          items.append({'name': item, 'type': 'folder', 'path': f'{item}/'})
+                  elif item.endswith('.md') and not item.startswith('_index'):
+                      items.append({'name': item[:-3], 'type': 'file', 'path': item[:-3] + '.html'})
+              return items
           
           if not os.path.exists(input_dir):
               print(f"❌ Папка {input_dir} не найдена!")
@@ -161,6 +181,20 @@ jobs:
                       if path == '.':
                           path = ''
                       
+                      # Если это _index.md — добавляем список содержимого папки
+                      if file == '_index.md':
+                          folder_path = os.path.dirname(md_path)
+                          folder_contents = get_folder_contents(folder_path)
+                          
+                          if folder_contents:
+                              html_content += '<hr><h2>📂 Содержимое папки</h2><ul>'
+                              for item in folder_contents:
+                                  if item['type'] == 'folder':
+                                      html_content += f'<li>📁 <a href="/{item["path"]}">{item["name"]}</a></li>'
+                                  else:
+                                      html_content += f'<li>📄 <a href="/{path}/{item["path"]}">{item["name"]}</a></li>'
+                              html_content += '</ul>'
+                      
                       breadcrumbs = generate_breadcrumbs(path, title)
                       
                       full_html = f"""<!DOCTYPE html>
@@ -174,6 +208,8 @@ jobs:
                           .breadcrumbs a{{color:#4a90e2;text-decoration:none}}
                           .breadcrumbs a:hover{{text-decoration:underline}}
                           .breadcrumbs span{{color:#aaa}}
+                          ul{{list-style:none;padding-left:0}}
+                          li{{padding:5px 0}}
                       </style>
                       </head>
                       <body>
@@ -217,7 +253,7 @@ jobs:
           fi
 
       # =============== ГЕНЕРАЦИЯ INDEX.HTML ===============
-      - name: 📋 Generate index with tree and breadcrumbs
+      - name: 📋 Generate index with tree
         run: |
           echo "📋 Генерирую главную страницу с деревом папок..."
           
