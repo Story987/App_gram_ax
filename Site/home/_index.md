@@ -4,6 +4,10 @@ order: 1
 
 
 
+ш
+
+
+
 
 
 Home
@@ -21,3 +25,27 @@ Home
 ```
 
 \</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+000
+
+
+
+\<img src="https://www.russianfood.com/dycontent/images_upl/525/big_524268.jpg"
+
+```
+ alt="Кулинарное изображение"
+
+ style="width: 100%; max-width: 600px; height: auto; display: block; margin: 0 auto;">
+```
