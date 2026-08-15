@@ -16,7 +16,6 @@ permissions:
   pages: write
   id-token: write
 
-# =============== ОТМЕНА СТАРЫХ ЗАПУСКОВ ===============
 concurrency:
   group: "pages"
   cancel-in-progress: true
@@ -39,7 +38,6 @@ jobs:
       - name: 📦 Install Python markdown library
         run: pip install markdown
 
-      # =============== ПРОВЕРКА ПАПКИ SITE ===============
       - name: 🔍 Check Site folder
         run: |
           if [ ! -d "./Site" ]; then
@@ -48,10 +46,10 @@ jobs:
           fi
           echo "✅ Папка Site найдена"
 
-      # =============== АНАЛИЗ СТРУКТУРЫ (JSON) ===============
-      - name: 📊 Analyze site structure
+      # =============== АНАЛИЗ СТРУКТУРЫ С ИЗВЛЕЧЕНИЕМ ТАЙТЛА ===============
+      - name: 📊 Analyze site structure with titles
         run: |
-          echo "📊 Анализирую структуру сайта..."
+          echo "📊 Анализирую структуру сайта и извлекаю заголовки..."
           cd Site
           echo '{ "generated": "'$(date)'", "pages": [' > site-structure.json
           first=true
@@ -63,23 +61,37 @@ jobs:
             fi
             filename=$(basename "$file")
             path=$(dirname "$file" | sed 's|^\./||')
-            title=$(head -1 "$file" | sed 's/^# //' || echo "$filename")
+            
+            # ИЗВЛЕКАЕМ ЗАГОЛОВОК ИЗ ПЕРВОЙ СТРОЧКИ С #
+            title=$(grep -m 1 '^# ' "$file" | sed 's/^# //' || echo "")
+            # Если заголовок пустой, используем имя файла
+            if [ -z "$title" ]; then
+              title="${filename%.md}"
+            fi
+            
             echo '  { "file": "'$filename'", "path": "'$path'", "title": "'$title'" }' >> site-structure.json
           done
           echo '] }' >> site-structure.json
           echo "✅ Анализ завершён"
 
-      # =============== КОНВЕРТАЦИЯ .md → .html ===============
+      # =============== КОНВЕРТАЦИЯ .md → .html С ТАЙТЛОМ ===============
       - name: 🌐 Convert MD to HTML
         run: |
           echo "🌐 Конвертирую .md в .html..."
           mkdir -p html_output
           
           cat > convert.py << 'EOF'
-          import os, json, markdown
+          import os, json, markdown, re
           
           input_dir = "Site"
           output_dir = "html_output"
+          
+          def extract_title(content):
+              # Ищем первую строку, начинающуюся с #
+              match = re.search(r'^# (.+)$', content, re.MULTILINE)
+              if match:
+                  return match.group(1).strip()
+              return None
           
           for root, dirs, files in os.walk(input_dir):
               for file in files:
@@ -93,32 +105,44 @@ jobs:
                       with open(md_path, 'r', encoding='utf-8') as f:
                           content = f.read()
                       
+                      # Извлекаем заголовок для <title>
+                      title = extract_title(content)
+                      if not title:
+                          title = os.path.basename(file)[:-3]
+                      
+                      # Конвертируем Markdown в HTML
                       html_content = markdown.markdown(content, extensions=['extra', 'toc'])
-                      title = os.path.basename(file)[:-3]
                       
                       full_html = f"""<!DOCTYPE html>
                       <html>
-                      <head><meta charset="UTF-8"><title>{title}</title>
-                      <style>body{{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
-                      h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
-                      pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
-                      </style></head>
-                      <body>{html_content}<hr><p><small>Сгенерировано из: {rel_path}</small></p></body>
+                      <head>
+                          <meta charset="UTF-8">
+                          <title>{title}</title>
+                          <style>
+                              body{{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
+                              h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
+                              pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
+                          </style>
+                      </head>
+                      <body>
+                          {html_content}
+                          <hr><p><small>Сгенерировано из: {rel_path}</small></p>
+                      </body>
                       </html>"""
                       with open(target, 'w', encoding='utf-8') as f:
                           f.write(full_html)
-                      print(f"✅ {rel_path} → {html_path}")
+                      print(f"✅ {rel_path} → {html_path} (тайтл: {title})")
           EOF
           
           python convert.py
           echo "✅ Конвертация завершена"
 
-      # =============== КОПИРОВАНИЕ JSON НА САЙТ ===============
+      # =============== КОПИРОВАНИЕ JSON ===============
       - name: 📋 Copy structure data
         run: |
           cp Site/site-structure.json html_output/ 2>/dev/null || echo "ℹ️ JSON не найден"
 
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML С ПОИСКОМ ===============
+      # =============== ГЕНЕРАЦИЯ INDEX.HTML ===============
       - name: 📋 Generate index with search
         run: |
           echo "📋 Генерирую главную страницу с поиском..."
@@ -217,7 +241,6 @@ jobs:
         with:
           path: html_output/
 
-  # =============== ДЕПЛОЙ ===============
   deploy:
     name: 🚀 Deploy to GitHub Pages
     runs-on: ubuntu-latest
