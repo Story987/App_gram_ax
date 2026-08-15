@@ -38,26 +38,47 @@ jobs:
       - name: 📦 Install Python markdown library
         run: pip install markdown
 
+      # =============== ДИАГНОСТИКА: ПРОВЕРКА ПАПКИ SITE ===============
       - name: 🔍 Check Site folder
         run: |
+          echo "🔍 Проверяю папку Site..."
           if [ ! -d "./Site" ]; then
             echo "❌ Папка Site не найдена!"
             exit 1
           fi
           echo "✅ Папка Site найдена"
-          echo "📋 Содержимое Site:"
-          find ./Site -type f -name "*.md" | head -20
+          echo "📋 Содержимое Site (первые 20 файлов):"
+          find ./Site -type f | head -20
+          echo "---"
+          echo "📊 Всего файлов в Site:"
+          find ./Site -type f | wc -l
 
-      # =============== АНАЛИЗ СТРУКТУРЫ ===============
+      # =============== ДИАГНОСТИКА: СПИСОК ВСЕХ .MD ФАЙЛОВ ===============
+      - name: 📋 List all MD files
+        run: |
+          echo "📋 Все .md файлы в Site:"
+          find ./Site -type f -name "*.md" -not -path "./node_modules/*" | sort
+          echo "---"
+          echo "📊 Количество .md файлов:"
+          find ./Site -type f -name "*.md" -not -path "./node_modules/*" | wc -l
+          echo "---"
+          echo "📄 Пример содержимого первого .md файла:"
+          FIRST_MD=$(find ./Site -type f -name "*.md" -not -path "./node_modules/*" | head -1)
+          if [ -n "$FIRST_MD" ]; then
+            echo "Файл: $FIRST_MD"
+            head -5 "$FIRST_MD" || echo "Не удалось прочитать файл"
+          else
+            echo "⚠️ .md файлы не найдены!"
+          fi
+
+      # =============== АНАЛИЗ СТРУКТУРЫ С .html В JSON ===============
       - name: 📊 Generate site structure
         run: |
-          echo "📊 Генерирую структуру сайта..."
+          echo "📊 Генерирую структуру сайта с .html..."
           cd Site
           
-          # Создаём JSON вручную, чтобы точно заполнить
           echo '{ "generated": "'$(date '+%Y-%m-%d %H:%M:%S')'", "items": [' > site-structure.json
           
-          # Находим все .md файлы и добавляем их в JSON
           first=true
           find . -type f -name "*.md" -not -path "./node_modules/*" | while read file; do
             if [ "$first" = true ]; then
@@ -66,34 +87,25 @@ jobs:
               echo ',' >> site-structure.json
             fi
             
-            # Получаем имя файла и путь
             filename=$(basename "$file")
+            html_filename="${filename%.md}.html"
             path=$(dirname "$file" | sed 's|^\./||')
             
-            # Извлекаем заголовок из файла
             title=$(grep -m 1 '^# ' "$file" | sed 's/^# //' || echo "")
             if [ -z "$title" ]; then
               title="${filename%.md}"
             fi
-            
-            # Экранируем кавычки в заголовке
             title=$(echo "$title" | sed 's/"/\\"/g')
             
-            echo '    { "file": "'$filename'", "path": "'$path'", "title": "'$title'" }' >> site-structure.json
-            
-            echo "  Найден: $filename в $path"
+            echo '    { "file": "'$html_filename'", "path": "'$path'", "title": "'$title'" }' >> site-structure.json
+            echo "  Найден: $filename → $html_filename в $path"
           done
           
           echo '] }' >> site-structure.json
           
-          # Проверяем, что JSON создался
-          if [ -f site-structure.json ]; then
-            echo "✅ JSON создан:"
-            cat site-structure.json | head -20
-          else
-            echo "❌ Ошибка: JSON не создан!"
-            exit 1
-          fi
+          echo "✅ JSON создан"
+          echo "📄 Содержимое JSON (первые 20 строк):"
+          cat site-structure.json | head -20
 
       # =============== КОНВЕРТАЦИЯ .md → .html ===============
       - name: 🌐 Convert MD to HTML
@@ -111,12 +123,11 @@ jobs:
               match = re.search(r'^# (.+)$', content, re.MULTILINE)
               return match.group(1).strip() if match else None
           
-          # Проверяем, что папка Site существует
           if not os.path.exists(input_dir):
               print(f"❌ Папка {input_dir} не найдена!")
               exit(1)
           
-          # Обходим все .md файлы
+          converted = 0
           for root, dirs, files in os.walk(input_dir):
               for file in files:
                   if file.endswith(".md"):
@@ -144,10 +155,25 @@ jobs:
                       with open(target, 'w', encoding='utf-8') as f:
                           f.write(full_html)
                       print(f"✅ {rel_path} → {html_path}")
+                      converted += 1
+          
+          print(f"📊 Всего сконвертировано файлов: {converted}")
           EOF
           
           python convert.py
           echo "✅ Конвертация завершена"
+
+      # =============== ДИАГНОСТИКА: ПРОВЕРКА HTML_OUTPUT ===============
+      - name: 📋 Check html_output
+        run: |
+          echo "📋 Содержимое html_output:"
+          find ./html_output -type f | sort
+          echo "---"
+          echo "📊 Количество файлов в html_output:"
+          find ./html_output -type f | wc -l
+          echo "---"
+          echo "📄 Пример структуры папок:"
+          find ./html_output -type d | head -10
 
       # =============== КОПИРОВАНИЕ JSON ===============
       - name: 📋 Copy structure data
@@ -230,7 +256,6 @@ jobs:
               return;
             }
             
-            // Группируем по папкам
             const tree = {};
             items.forEach(item => {
               const path = item.path || '';
@@ -248,7 +273,7 @@ jobs:
                 hasRootFiles = true;
                 html += `<div class="root-files">`;
                 files.forEach(file => {
-                  const href = file.file.replace('.md', '.html');
+                  const href = file.file;
                   html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div>`;
@@ -260,7 +285,7 @@ jobs:
                 html += `</div>`;
                 html += `<div class="folder-content">`;
                 files.forEach(file => {
-                  const href = file.file.replace('.md', '.html');
+                  const href = file.file;
                   html += `<a href="${href}" class="file-item">📄 <span class="title">${file.title || file.file}</span></a>`;
                 });
                 html += `</div></div>`;
@@ -273,7 +298,6 @@ jobs:
             
             container.innerHTML = html;
             
-            // Поиск
             document.getElementById('search-input').addEventListener('input', function(e) {
               const term = e.target.value.toLowerCase();
               document.querySelectorAll('.file-item').forEach(item => {
