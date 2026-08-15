@@ -107,10 +107,10 @@ jobs:
           echo "📄 Содержимое JSON (первые 20 строк):"
           cat site-structure.json | head -20
 
-      # =============== КОНВЕРТАЦИЯ .md → .html ===============
-      - name: 🌐 Convert MD to HTML
+      # =============== КОНВЕРТАЦИЯ .md → .html С ХЛЕБНЫМИ КРОШКАМИ ===============
+      - name: 🌐 Convert MD to HTML with breadcrumbs
         run: |
-          echo "🌐 Конвертирую .md в .html..."
+          echo "🌐 Конвертирую .md в .html с хлебными крошками..."
           mkdir -p html_output
           
           cat > convert.py << 'EOF'
@@ -122,6 +122,20 @@ jobs:
           def extract_title(content):
               match = re.search(r'^# (.+)$', content, re.MULTILINE)
               return match.group(1).strip() if match else None
+          
+          def generate_breadcrumbs(path, title):
+              """Генерирует HTML для хлебных крошек"""
+              if not path or path == '.':
+                  return f'<a href="/">Главная</a> › <span>{title}</span>'
+              
+              parts = path.split('/')
+              breadcrumb_html = '<a href="/">Главная</a>'
+              current_path = ''
+              for part in parts:
+                  current_path += part + '/'
+                  breadcrumb_html += f' › <a href="/{current_path}">{part}</a>'
+              breadcrumb_html += f' › <span>{title}</span>'
+              return breadcrumb_html
           
           if not os.path.exists(input_dir):
               print(f"❌ Папка {input_dir} не найдена!")
@@ -143,18 +157,35 @@ jobs:
                       title = extract_title(content) or os.path.basename(file)[:-3]
                       html_content = markdown.markdown(content, extensions=['extra', 'toc'])
                       
+                      # Получаем путь для хлебных крошек
+                      path = os.path.dirname(rel_path)
+                      if path == '.':
+                          path = ''
+                      
+                      breadcrumbs = generate_breadcrumbs(path, title)
+                      
                       full_html = f"""<!DOCTYPE html>
                       <html>
                       <head><meta charset="UTF-8"><title>{title}</title>
-                      <style>body{{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
-                      h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
-                      pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
-                      </style></head>
-                      <body>{html_content}<hr><p><small>Сгенерировано из: {rel_path}</small></p></body>
+                      <style>
+                          body{{font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6}}
+                          h1,h2,h3{{color:#2c3e50}}a{{color:#3498db}}code{{background:#f4f4f4;padding:2px 6px;border-radius:4px}}
+                          pre{{background:#f4f4f4;padding:10px;border-radius:4px;overflow-x:auto}}
+                          .breadcrumbs{{background:#1a1a2e;color:#e0e0e0;padding:10px 15px;border-radius:8px;margin-bottom:20px;font-size:0.9rem}}
+                          .breadcrumbs a{{color:#4a90e2;text-decoration:none}}
+                          .breadcrumbs a:hover{{text-decoration:underline}}
+                          .breadcrumbs span{{color:#aaa}}
+                      </style>
+                      </head>
+                      <body>
+                          <div class="breadcrumbs">{breadcrumbs}</div>
+                          {html_content}
+                          <hr><p><small>Сгенерировано из: {rel_path}</small></p>
+                      </body>
                       </html>"""
                       with open(target, 'w', encoding='utf-8') as f:
                           f.write(full_html)
-                      print(f"✅ {rel_path} → {html_path}")
+                      print(f"✅ {rel_path} → {html_path} (крошки: {breadcrumbs})")
                       converted += 1
           
           print(f"📊 Всего сконвертировано файлов: {converted}")
@@ -186,10 +217,10 @@ jobs:
             exit 1
           fi
 
-      # =============== ГЕНЕРАЦИЯ INDEX.HTML С ИСПРАВЛЕННЫМИ ПУТЯМИ ===============
-      - name: 📋 Generate index with working tree
+      # =============== ГЕНЕРАЦИЯ INDEX.HTML С ДЕРЕВОМ И ХЛЕБНЫМИ КРОШКАМИ ===============
+      - name: 📋 Generate index with tree and breadcrumbs
         run: |
-          echo "📋 Генерирую главную страницу с деревом папок..."
+          echo "📋 Генерирую главную страницу с деревом папок и хлебными крошками..."
           
           cat > html_output/index.html << 'EOF'
           <!DOCTYPE html>
@@ -218,6 +249,9 @@ jobs:
           .root-files { margin-left: 0.5rem; }
           .empty { text-align: center; padding: 2rem; color: #888; }
           .footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #2a2a3e; margin-top: 2rem; }
+          .breadcrumb-path { font-size: 0.9rem; color: #888; margin-bottom: 1rem; padding: 0.5rem 1rem; background: #1a1a2e; border-radius: 8px; display: none; }
+          .breadcrumb-path a { color: #4a90e2; text-decoration: none; }
+          .breadcrumb-path a:hover { text-decoration: underline; }
           </style>
           </head>
           <body>
@@ -336,7 +370,7 @@ jobs:
           </html>
           EOF
           
-          echo "✅ Главная страница с деревом создана"
+          echo "✅ Главная страница с деревом и хлебными крошками создана"
 
       # =============== ЗАГРУЗКА АРТЕФАКТА ===============
       - name: 📦 Upload GitHub Pages artifact
